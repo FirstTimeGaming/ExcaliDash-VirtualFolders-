@@ -1,4 +1,12 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  afterAll,
+  beforeEach,
+  vi,
+} from "vitest";
 import request from "supertest";
 import fs from "fs";
 import path from "path";
@@ -13,6 +21,12 @@ import {
 } from "./importsCompatFixtures";
 import { getTestPrisma, setupTestDb, cleanupTestDb } from "./testUtils";
 import { BOOTSTRAP_USER_ID } from "../auth/authMode";
+import { downloadBuffer } from "../s3";
+
+vi.mock("../s3", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../s3")>()),
+  downloadBuffer: vi.fn(),
+}));
 
 describe("Import compatibility (legacy exports)", () => {
   const uploadsDir = path.resolve(__dirname, "../../uploads");
@@ -40,6 +54,8 @@ describe("Import compatibility (legacy exports)", () => {
 
   beforeEach(async () => {
     await cleanupTestDb(prisma);
+    await prisma.drawingFile.deleteMany({});
+    vi.mocked(downloadBuffer).mockReset();
   });
 
   afterAll(async () => {
@@ -328,4 +344,154 @@ describe("Import compatibility (legacy exports)", () => {
       created: 123,
     });
   });
+
+  const createBackupImageDrawing = async (files: Record<string, unknown>) =>
+    prisma.drawing.create({
+      data: {
+        id: "backup-images",
+        name: "Backup images",
+        elements: JSON.stringify([
+          { id: "external-element", type: "image", fileId: "external" },
+          { id: "managed-element", type: "image", fileId: "managed" },
+        ]),
+        appState: "{}",
+        files: JSON.stringify(files),
+        userId: BOOTSTRAP_USER_ID,
+      },
+    });
+
+  it("round-trips unmanaged HTTP(S) references alongside bundled managed images", async () => {
+    const externalUrls = {
+      external: "https://external.example/imported.png?version=1",
+      legacy: "http://legacy.example/image.png",
+    };
+    const externalFiles = Object.fromEntries(
+      Object.entries(externalUrls).map(([id, dataURL]) => [
+        id,
+        { id, mimeType: "image/png", dataURL, created: 123 },
+      ]),
+    );
+    const imageBytes = Buffer.from("round-trip managed image");
+    const drawing = await createBackupImageDrawing({
+      ...externalFiles,
+      managed: {
+        id: "managed",
+        mimeType: "image/png",
+        dataURL: "https://cdn.example/managed.png",
+      },
+    });
+    await prisma.drawingFile.create({
+      data: {
+        drawingId: drawing.id,
+        fileId: "managed",
+        mimeType: "image/png",
+        sizeBytes: imageBytes.length,
+        storage: "db",
+        data: imageBytes,
+      },
+    });
+
+    const buffer = await downloadExport();
+    const zip = await JSZip.loadAsync(buffer);
+    const manifest = JSON.parse(
+      await zip.file("excalidash.manifest.json")!.async("string"),
+    );
+    const exported = JSON.parse(
+      await zip.file(manifest.drawings[0].filePath)!.async("string"),
+    );
+    expect(exported.files).toMatchObject(externalFiles);
+    expect(exported.files.managed.dataURL).toBe(
+      `data:image/png;base64,${imageBytes.toString("base64")}`,
+    );
+    expect(exported.elements).toEqual(JSON.parse(drawing.elements));
+    expect(downloadBuffer).not.toHaveBeenCalled();
+
+    // Restore into an empty account so this exercises creation and interning.
+    await cleanupTestDb(prisma);
+    await prisma.drawingFile.deleteMany({});
+    const imported = await agent
+      .post("/import/excalidash")
+      .set("User-Agent", userAgent)
+      .set(csrfHeaderName, csrfToken)
+      .attach("archive", buffer, "backup.excalidash");
+    expect(imported.status).toBe(200);
+    const restored = await prisma.drawing.findUniqueOrThrow({
+      where: { id: drawing.id },
+    });
+    for (const [fileId, dataURL] of Object.entries(externalUrls)) {
+      expect(JSON.parse(restored.files)[fileId]).toMatchObject({
+        id: fileId,
+        mimeType: "image/png",
+        dataURL,
+      });
+    }
+    expect(JSON.parse(restored.elements)).toEqual(exported.elements);
+    expect(JSON.parse(restored.files).managed.dataURL).toBe(
+      `/api/files/${drawing.id}/managed`,
+    );
+    const stored = await prisma.drawingFile.findMany({
+      where: { drawingId: drawing.id },
+    });
+    expect(stored).toHaveLength(1);
+    expect(stored[0].fileId).toBe("managed");
+    expect(Buffer.from(stored[0].data!)).toEqual(imageBytes);
+    expect(downloadBuffer).not.toHaveBeenCalled();
+    expect(await downloadExport()).toEqual(expect.any(Buffer));
+  });
+
+  it.each([
+    "missing row",
+    "missing db bytes",
+    "missing s3 key",
+    "s3 missing",
+    "s3 error",
+  ])(
+    "returns a complete HTTP 500 before streaming when managed storage has %s",
+    async (failure) => {
+      const drawing = await createBackupImageDrawing({
+        managed: {
+          id: "managed",
+          mimeType: "image/png",
+          dataURL:
+            failure === "missing row"
+              ? "/api/files/backup-images/managed"
+              : "https://cdn.example/managed.png",
+        },
+        external: {
+          id: "external",
+          mimeType: "image/png",
+          dataURL: "https://external.example/image.png",
+        },
+      });
+      if (failure !== "missing row") {
+        await prisma.drawingFile.create({
+          data: {
+            drawingId: drawing.id,
+            fileId: "managed",
+            mimeType: "image/png",
+            sizeBytes: 42,
+            storage: failure === "missing db bytes" ? "db" : "s3",
+            s3Key: failure.startsWith("s3 ") ? "managed/image.png" : null,
+            data: null,
+          },
+        });
+      }
+      vi.mocked(downloadBuffer).mockRejectedValue(
+        new Error(
+          failure === "s3 missing" ? "NoSuchKey" : "storage unavailable",
+        ),
+      );
+      const response = await agent
+        .get("/export/excalidash")
+        .set("User-Agent", userAgent)
+        .timeout({ response: 5000, deadline: 10000 });
+      expect(response.status).toBe(500);
+      expect(response.headers["content-type"]).toContain("application/json");
+      expect(response.headers["content-disposition"]).toBeUndefined();
+      expect(response.body.error).toBe("Internal server error");
+      expect(downloadBuffer).toHaveBeenCalledTimes(
+        failure.startsWith("s3 ") ? 1 : 0,
+      );
+    },
+  );
 });

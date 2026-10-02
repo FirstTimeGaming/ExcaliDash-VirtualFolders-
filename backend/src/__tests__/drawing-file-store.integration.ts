@@ -13,6 +13,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
+import JSZip from "jszip";
 import bcrypt from "bcrypt";
 import jwt, { SignOptions } from "jsonwebtoken";
 import { StringValue } from "ms";
@@ -337,5 +338,51 @@ describe("DrawingFile store (database-bytes mode)", () => {
     expect(result.body.preview).toContain('mask="url(#crop)"');
     expect(result.body.preview).toContain(PNG_DATA_URL);
     expect(result.body.preview).not.toMatch(/untrusted|javascript:|<script/);
+  });
+
+  it("requires authentication and exports only the account owner's image references", async () => {
+    const external = {
+      id: "external",
+      mimeType: "image/png",
+      dataURL: "https://external.example/imported.png",
+    };
+    const owned = await createDrawing(owner.id, { external });
+    // A broken managed image in another account must neither leak nor block us.
+    await createDrawing(other.id, {
+      missing: {
+        id: "missing",
+        mimeType: "image/png",
+        dataURL: "/api/files/other-drawing/missing",
+      },
+    });
+    expect((await agent.get("/export/excalidash")).status).toBe(401);
+    const exported = await agent
+      .get("/export/excalidash")
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .buffer(true)
+      .parse((res, callback) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+        res.on("end", () => callback(null, Buffer.concat(chunks)));
+        res.on("error", callback);
+      });
+    expect(exported.status).toBe(200);
+    const zip = await JSZip.loadAsync(exported.body);
+    const manifest = JSON.parse(
+      await zip.file("excalidash.manifest.json")!.async("string"),
+    );
+    expect(manifest.drawings).toHaveLength(1);
+    expect(manifest.drawings[0].id).toBe(owned.id);
+    const drawing = JSON.parse(
+      await zip.file(manifest.drawings[0].filePath)!.async("string"),
+    );
+    expect(drawing.files).toEqual({ external });
+
+    const unauthenticatedImport = await agent
+      .post("/import/excalidash")
+      .set("User-Agent", userAgent)
+      .set(csrfHeaderName, csrfToken)
+      .attach("archive", exported.body, "backup.excalidash");
+    expect(unauthenticatedImport.status).toBe(401);
   });
 });

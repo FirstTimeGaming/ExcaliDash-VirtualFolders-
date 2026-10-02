@@ -139,6 +139,35 @@ export const registerExcalidashExportRoute = (
         drawings: drawingsManifest,
       };
 
+      // Finish all fallible image bundling before starting the response. A
+      // missing managed image must fail the backup, not leave a partial ZIP.
+      const exportedFilesByDrawingId = new Map<
+        string,
+        Record<string, unknown>
+      >();
+      for (const drawing of drawings) {
+        const storedFiles = await prisma.drawingFile.findMany({
+          where: { drawingId: drawing.id },
+          select: {
+            fileId: true,
+            mimeType: true,
+            storage: true,
+            s3Key: true,
+            data: true,
+          },
+        });
+        exportedFilesByDrawingId.set(
+          drawing.id,
+          await embedDrawingFilesForExport(
+            parseJsonField(drawing.files, {} as Record<string, unknown>),
+            storedFiles,
+          ),
+        );
+      }
+      for (const meta of drawingsManifest) {
+        assertSafeArchivePath(meta.filePath);
+      }
+
       res.setHeader("Content-Type", "application/zip");
       res.setHeader(
         "Content-Disposition",
@@ -179,20 +208,7 @@ export const registerExcalidashExportRoute = (
       for (const drawing of drawings) {
         const meta = drawingsManifestById.get(drawing.id);
         if (!meta) continue;
-        const storedFiles = await prisma.drawingFile.findMany({
-          where: { drawingId: drawing.id },
-          select: {
-            fileId: true,
-            mimeType: true,
-            storage: true,
-            s3Key: true,
-            data: true,
-          },
-        });
-        const files = await embedDrawingFilesForExport(
-          parseJsonField(drawing.files, {} as Record<string, unknown>),
-          storedFiles,
-        );
+        const files = exportedFilesByDrawingId.get(drawing.id)!;
         const excalidashMeta = {
           drawingId: drawing.id,
           collectionId: drawing.collectionId ?? null,
@@ -210,7 +226,6 @@ export const registerExcalidashExportRoute = (
           files,
           excalidash: excalidashMeta,
         };
-        assertSafeArchivePath(meta.filePath);
         archive.append(JSON.stringify(drawingData, null, 2), {
           name: meta.filePath,
         });

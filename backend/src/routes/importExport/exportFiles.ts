@@ -10,10 +10,24 @@ type ExportFileRecord = {
 
 type ExcalidrawFile = Record<string, unknown> & { dataURL?: unknown };
 
+const isUnmanagedExternalReference = (value: string): boolean => {
+  if (value.length > 2048 || !/^https?:\/\//i.test(value)) return false;
+  try {
+    const url = new URL(value);
+    // Absolute URLs to the managed endpoint still require stored bytes.
+    return !/^\/api\/files(?:\/|$)/i.test(url.pathname);
+  } catch {
+    return false;
+  }
+};
+
 /**
  * Make exported drawings portable by replacing managed file references with
  * inline data URLs. DrawingFile is authoritative even when Drawing.files has
  * a public CDN URL rather than an /api/files URL.
+ * Imported external HTTP(S) references without a DrawingFile remain unchanged,
+ * as supported by the v1 backup importer. Never fetch user-supplied URLs here:
+ * these images remain dependent on their original host rather than portable.
  */
 export const embedDrawingFilesForExport = async (
   files: Record<string, unknown>,
@@ -59,7 +73,8 @@ export const embedDrawingFilesForExport = async (
       return (
         typeof dataURL === "string" &&
         dataURL.length > 0 &&
-        !dataURL.startsWith("data:")
+        !dataURL.startsWith("data:") &&
+        !isUnmanagedExternalReference(dataURL)
       );
     })
     .map(([fileId]) => fileId);
