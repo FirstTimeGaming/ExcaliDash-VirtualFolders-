@@ -18,7 +18,7 @@ export const DragPreview: React.FC<DragPreviewProps> = ({ drawings }) => (
         {drawings.slice(0, 3).map((drawing, index) => (
           <div
             key={drawing.id}
-            className="absolute inset-0 bg-slate-50 border-2 border-black rounded-xl shadow-sm flex items-center justify-center overflow-hidden"
+            className="absolute inset-0 bg-slate-50 dark:bg-neutral-900 border-2 border-slate-800 dark:border-neutral-700 rounded-xl shadow-sm flex items-center justify-center overflow-hidden"
             style={{
               transform: `translate(${index * 4}px, ${index * 4}px)`,
               zIndex: 3 - index,
@@ -29,11 +29,11 @@ export const DragPreview: React.FC<DragPreviewProps> = ({ drawings }) => (
             <div className="absolute inset-0 opacity-[0.3] bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] [background-size:24px_24px]" />
             {drawing.preview ? (
               <div
-                className="w-full h-full p-2 flex items-center justify-center [&>svg]:w-auto [&>svg]:h-auto [&>svg]:max-w-full [&>svg]:max-h-full [&>svg]:drop-shadow-sm relative z-10"
+                className="drawing-preview w-full h-full p-2 flex items-center justify-center [&>svg]:w-auto [&>svg]:h-auto [&>svg]:max-w-full [&>svg]:max-h-full [&>svg]:drop-shadow-sm relative z-10"
                 dangerouslySetInnerHTML={{ __html: drawing.preview }}
               />
             ) : (
-              <div className="text-slate-300 relative z-10">
+              <div className="text-slate-300 dark:text-neutral-600 relative z-10">
                 <Folder size={24} />
               </div>
             )}

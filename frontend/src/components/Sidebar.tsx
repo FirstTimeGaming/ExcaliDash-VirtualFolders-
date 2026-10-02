@@ -167,18 +167,31 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {isCreating && (
               <form
                 onSubmit={handleCreateSubmit}
-                className="mb-2 px-4"
+                className="mb-2 pl-3 pr-2"
                 onClick={(e) => e.stopPropagation()}
               >
-                <input
-                  autoFocus
-                  type="text"
-                  value={newCollectionName}
-                  onChange={(e) => setNewCollectionName(e.target.value)}
-                  placeholder={t("sidebar.newCollectionPlaceholder")}
-                  className="w-full px-3 py-2 text-sm bg-white dark:bg-neutral-800 border-2 border-slate-800 dark:border-neutral-700 rounded-lg shadow-[1.5px_1.5px_0px_0px_rgba(30,41,59,0.9)] dark:shadow-[1.5px_1.5px_0px_0px_rgba(255,255,255,0.18)] outline-none placeholder:text-slate-400 dark:placeholder:text-neutral-500 font-semibold text-slate-900 dark:text-white"
-                  onBlur={() => !newCollectionName && setIsCreating(false)}
-                />
+                <div className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-1 dark:bg-neutral-800">
+                  <Folder
+                    size={18}
+                    className="shrink-0 text-slate-400 dark:text-neutral-500"
+                  />
+                  <input
+                    autoFocus
+                    type="text"
+                    value={newCollectionName}
+                    onChange={(e) => setNewCollectionName(e.target.value)}
+                    placeholder={t("sidebar.newCollectionPlaceholder")}
+                    aria-label="Collection name"
+                    className="ui-input min-w-0 w-full py-1.5 font-medium"
+                    onBlur={() => !newCollectionName && setIsCreating(false)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        setNewCollectionName("");
+                        setIsCreating(false);
+                      }
+                    }}
+                  />
+                </div>
               </form>
             )}
             {collections
@@ -216,23 +229,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           {t("sidebar.shared")}
                         </span>
                       )}
-                      {/* Role badge */}
-                      <span
-                        className={clsx(
-                          "shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold",
-                          collection.isOwner === false
-                            ? collection.sharedRole === "edit"
+                      {/* Only show roles for collections shared with this user. */}
+                      {collection.isOwner === false && (
+                        <span
+                          className={clsx(
+                            "shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold",
+                            collection.sharedRole === "edit"
                               ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800"
-                              : "bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800"
-                            : "bg-slate-100 dark:bg-neutral-800 text-slate-400 dark:text-neutral-500 border-slate-200 dark:border-neutral-700",
-                        )}
-                      >
-                        {collection.isOwner === false
-                          ? collection.sharedRole === "edit"
+                              : "bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800",
+                          )}
+                        >
+                          {collection.sharedRole === "edit"
                             ? t("sidebar.editor")
-                            : t("sidebar.viewer")
-                          : t("sidebar.owner")}
-                      </span>
+                            : t("sidebar.viewer")}
+                        </span>
+                      )}
                     </div>
                   }
                 />

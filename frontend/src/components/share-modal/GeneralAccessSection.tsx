@@ -212,6 +212,7 @@ export const GeneralAccessSection: React.FC<Props> = ({
       <div className="min-w-0 flex-1">
         <PlayfulSelect
           ariaLabel="Link access"
+          portal
           value={activeLink ? "anyone" : "restricted"}
           onChange={(value) => {
             if (value === "anyone") void handleUpdateLink();
@@ -247,6 +248,7 @@ export const GeneralAccessSection: React.FC<Props> = ({
           />
           <PlayfulSelect
             ariaLabel="Link permission"
+            portal
             value={linkPermission}
             onChange={(value) => handleUpdateLink(value as "view" | "edit")}
             options={[

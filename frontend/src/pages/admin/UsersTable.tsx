@@ -85,7 +85,9 @@ export const UsersTable: React.FC<UsersTableProps> = ({
                   <PlayfulSelect
                     ariaLabel={`Role for ${user.name}`}
                     value={user.role}
-                    disabled={user.id === currentUserId}
+                    disabled={
+                      user.id === currentUserId || user.id === "bootstrap-admin"
+                    }
                     onChange={(role) => onRoleChange(user, role)}
                     size="sm"
                     portal

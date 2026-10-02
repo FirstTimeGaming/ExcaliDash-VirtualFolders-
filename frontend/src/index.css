@@ -195,6 +195,35 @@ html.dark body {
   height: 0;
 }
 
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+  color-scheme: light;
+}
+
+.dark .custom-scrollbar {
+  scrollbar-color: #525252 transparent;
+  color-scheme: dark;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #525252;
+}
+
 @font-face {
   font-family: "Excalifont";
   src: url("./assets/fonts/Excalifont-Regular.woff2") format("woff2");

@@ -186,7 +186,7 @@ export const ShareCollectionModal: React.FC<Props> = ({
                 />
               </div>
               {/* Role picker for new additions */}
-              <div className="shrink-0 border-2 border-slate-800 dark:border-neutral-700 rounded-xl px-1 bg-white dark:bg-neutral-900 shadow-[1.5px_1.5px_0px_0px_rgba(30,41,59,0.9)] dark:shadow-[1.5px_1.5px_0px_0px_rgba(255,255,255,0.18)]">
+              <div className="shrink-0">
                 <RoleSelect
                   value={addRole}
                   onChange={(v) => setAddRole(v as CollectionShareRole)}

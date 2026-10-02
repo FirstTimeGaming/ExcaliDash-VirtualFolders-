@@ -279,9 +279,9 @@ export const ShareModal: React.FC<Props> = ({ drawingId, isOpen, onClose }) => {
       />
 
       {/* The popover container positioned under the share button */}
-      <div className="absolute right-0 top-full mt-2 z-[160] flex max-h-[calc(100vh-5rem)] w-[460px] flex-col overflow-hidden rounded-2xl border-2 border-slate-800 bg-white font-sans shadow-[3px_3px_0px_0px_rgba(30,41,59,0.9)] animate-in fade-in slide-in-from-top-3 duration-200 dark:border-neutral-600 dark:bg-neutral-900 dark:shadow-[3px_3px_0px_0px_rgba(255,255,255,0.18)]">
+      <div className="absolute right-0 top-full mt-2 z-[160] flex max-h-[calc(100dvh-5rem)] w-[min(460px,calc(100vw-24px))] flex-col overflow-hidden rounded-2xl border-2 border-slate-800 bg-white font-sans shadow-[3px_3px_0px_0px_rgba(30,41,59,0.9)] animate-in fade-in slide-in-from-top-3 duration-200 dark:border-neutral-600 dark:bg-neutral-900 dark:shadow-[3px_3px_0px_0px_rgba(255,255,255,0.18)]">
         {/* Content */}
-        <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
+        <div className="custom-scrollbar min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
           {error && (
             <div className="flex items-center gap-2.5 rounded-xl border-2 border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-600 dark:border-rose-800 dark:bg-rose-900/20 dark:text-rose-400">
               <AlertTriangle size={16} strokeWidth={2} />

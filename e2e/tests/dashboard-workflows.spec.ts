@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { openAccountMenu } from "./helpers/sidebar";
 import type { Locator, Page } from "@playwright/test";
 import {
   API_URL,
@@ -78,6 +79,7 @@ test.describe("Dashboard Workflows", () => {
     await page.getByTitle("Move to Trash").click();
     await expect(cardLocator).toHaveCount(0);
 
+    await openAccountMenu(page);
     await page.getByRole("button", { name: /^Trash$/ }).click();
     const trashCard = await ensureCardVisible(page, createdDrawing.id);
 

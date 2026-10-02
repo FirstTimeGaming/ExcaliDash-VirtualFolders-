@@ -54,6 +54,7 @@ export const SharePeopleSection: React.FC<Props> = ({
         </div>
         <PlayfulSelect
           ariaLabel="Permission for new people"
+          portal
           value={userPermission}
           onChange={(value) => setUserPermission(value as "view" | "edit")}
           options={permissionOptions}
@@ -131,6 +132,7 @@ export const SharePeopleSection: React.FC<Props> = ({
             </div>
             <PlayfulSelect
               ariaLabel={`Access for ${permission.granteeUser.name}`}
+              portal
               value={permission.permission}
               onChange={async (value) => {
                 if (value === "remove") await handleRevokeUser(permission.id);

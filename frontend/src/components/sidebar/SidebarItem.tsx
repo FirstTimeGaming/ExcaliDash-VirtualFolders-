@@ -45,7 +45,8 @@ export const SidebarItem: React.FC<SidebarItemProps> = ({
             type="text"
             value={editValue}
             onChange={(e) => onEditChange?.(e.target.value)}
-            className="w-full px-3 py-2 text-sm bg-white dark:bg-neutral-800 border-2 border-slate-800 dark:border-neutral-700 rounded-lg shadow-[1.5px_1.5px_0px_0px_rgba(30,41,59,0.9)] dark:shadow-[1.5px_1.5px_0px_0px_rgba(255,255,255,0.18)] outline-none font-semibold text-slate-900 dark:text-white"
+            aria-label="Collection name"
+            className="ui-input w-full font-medium"
             onBlur={onEditBlur}
           />
         </form>
@@ -89,7 +90,7 @@ export const SidebarItem: React.FC<SidebarItemProps> = ({
           >
             {icon}
           </span>
-          <span className="min-w-0 flex-1 text-left font-semibold">
+          <span className="min-w-0 flex-1 truncate text-left font-semibold">
             {label}
           </span>
           {extraAction && (

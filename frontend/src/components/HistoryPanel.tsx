@@ -210,7 +210,7 @@ export const HistoryPanel: React.FC<Props> = ({
         </div>
 
         {/* Snapshot list */}
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto">
           {loading ? (
             <div className="flex items-center justify-center py-12 text-slate-400">
               <span className="text-sm font-semibold">Loading history…</span>

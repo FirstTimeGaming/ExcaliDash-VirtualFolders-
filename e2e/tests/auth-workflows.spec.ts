@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import type { APIRequestContext, Page } from "@playwright/test";
 import { owner, viewer } from "../fixtures/auth";
+import { openAccountMenu } from "./helpers/sidebar";
 import {
   API_URL,
   createDrawing,
@@ -49,6 +50,7 @@ test("login rejects a bad password, survives reload, and logout blocks private a
     await page.reload();
     await expect(page.getByPlaceholder("Search drawings...")).toBeVisible();
     expect((await page.request.get(`${API_URL}/auth/me`)).status()).toBe(200);
+    await openAccountMenu(page);
     await page.getByRole("button", { name: "Logout", exact: true }).click();
     await expect(
       page.getByRole("button", { name: "Sign in", exact: true }),
@@ -210,6 +212,59 @@ test("a rejected stale save leaves the accepted scene and version intact", async
     expect(saved.elements?.map((element) => element.id)).toEqual(["winner"]);
   } finally {
     await deleteDrawing(request, drawing.id);
+  }
+});
+
+test("compact account menu hides email and persists its display preference", async ({
+  page,
+}) => {
+  await signIn(page);
+  const preferences = await page.request.get(`${API_URL}/auth/preferences`);
+  const before = (await preferences.json()).preferences.compactSidebar ?? true;
+  try {
+    await page.goto("/settings");
+    const toggle = page.getByRole("switch", { name: "Toggle compact sidebar" });
+    if ((await toggle.getAttribute("aria-checked")) !== "true")
+      await toggle.click();
+    await expect(
+      page.getByRole("button", { name: "Account menu", exact: true }),
+    ).toBeVisible();
+    const sidebar = page.locator("aside");
+    await expect(sidebar.getByText(owner.email, { exact: true })).toHaveCount(
+      0,
+    );
+    await expect(
+      sidebar.getByRole("button", { name: "Trash", exact: true }),
+    ).toBeHidden();
+    await openAccountMenu(page);
+    await expect(
+      sidebar.getByRole("button", { name: "Trash", exact: true }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(
+      sidebar.getByRole("button", { name: "Trash", exact: true }),
+    ).toBeHidden();
+    await toggle.click();
+    await expect
+      .poll(async () => {
+        const result = await page.request.get(`${API_URL}/auth/preferences`);
+        return (await result.json()).preferences.compactSidebar;
+      })
+      .toBe(false);
+    await page.reload();
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await expect(
+      sidebar.getByRole("button", { name: "Trash", exact: true }),
+    ).toBeVisible();
+    await expect(sidebar.getByText(owner.email, { exact: true })).toHaveCount(
+      0,
+    );
+  } finally {
+    const restored = await page.request.put(`${API_URL}/auth/preferences`, {
+      headers: await getCsrfHeaders(page.request),
+      data: { compactSidebar: before },
+    });
+    expect(restored.ok()).toBe(true);
   }
 });
 

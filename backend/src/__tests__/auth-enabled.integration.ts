@@ -112,6 +112,66 @@ describe("Auth Enabled Toggle Authorization", () => {
     expect(response.body?.message).toContain("Admin access required");
   });
 
+  it("protects the bootstrap admin role through both admin endpoints", async () => {
+    await prisma.user.upsert({
+      where: { id: "bootstrap-admin" },
+      update: { role: "ADMIN" },
+      create: {
+        id: "bootstrap-admin",
+        email: "bootstrap@excalidash.local",
+        passwordHash: "",
+        name: "Bootstrap Admin",
+        role: "ADMIN",
+        isActive: false,
+      },
+    });
+    const role = await agent
+      .post("/auth/admins")
+      .set("User-Agent", userAgent)
+      .set("Authorization", `Bearer ${adminUserToken}`)
+      .set(csrfHeaderName, csrfToken)
+      .send({ identifier: "bootstrap@excalidash.local", role: "USER" });
+    expect(role.status).toBe(409);
+    expect(role.body.message).toContain("bootstrap account");
+    const update = await agent
+      .patch("/auth/users/bootstrap-admin")
+      .set("User-Agent", userAgent)
+      .set("Authorization", `Bearer ${adminUserToken}`)
+      .set(csrfHeaderName, csrfToken)
+      .send({ role: "USER" });
+    expect(update.status).toBe(409);
+    expect(update.body.message).toContain("bootstrap account");
+    expect(
+      (
+        await prisma.user.findUniqueOrThrow({
+          where: { id: "bootstrap-admin" },
+        })
+      ).role,
+    ).toBe("ADMIN");
+  });
+
+  it("persists the compact sidebar preference without accepting unknown fields", async () => {
+    const setPreference = (data: Record<string, unknown>) =>
+      agent
+        .put("/auth/preferences")
+        .set("User-Agent", userAgent)
+        .set("Authorization", `Bearer ${regularUserToken}`)
+        .set(csrfHeaderName, csrfToken)
+        .send(data);
+    const updated = await setPreference({ compactSidebar: false });
+    expect(updated.status).toBe(200);
+    const fetched = await agent
+      .get("/auth/preferences")
+      .set("Authorization", `Bearer ${regularUserToken}`);
+    expect(fetched.status).toBe(200);
+    expect(fetched.body.preferences.compactSidebar).toBe(false);
+    expect(
+      (await setPreference({ compactSidebar: true, unknownPreference: true }))
+        .status,
+    ).toBe(400);
+    expect((await setPreference({ compactSidebar: "false" })).status).toBe(400);
+  });
+
   it("applies auth mode change immediately for subsequent requests", async () => {
     const warmStatusResponse = await request(app)
       .get("/auth/status")

@@ -32,6 +32,10 @@ export const Settings: React.FC = () => {
     "editorAutoHide",
     true,
   );
+  const [compactSidebar, setCompactSidebar] = usePreference(
+    "compactSidebar",
+    true,
+  );
   const mustResetPassword = Boolean(user?.mustResetPassword);
   const [settingsSuccess, setSettingsSuccess] = useState("");
   const [legacyDbImportConfirmation, setLegacyDbImportConfirmation] = useState<{
@@ -362,6 +366,8 @@ export const Settings: React.FC = () => {
             onImageCompressionThresholdChange={updateImageCompressionThreshold}
             editorAutoHide={editorAutoHide}
             onEditorAutoHideChange={setEditorAutoHide}
+            compactSidebar={compactSidebar}
+            onCompactSidebarChange={setCompactSidebar}
             updateChannel={updateChannel}
             updateInfo={updateInfo}
             updateLoading={updateLoading}

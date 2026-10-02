@@ -1,5 +1,6 @@
 import {
   Archive,
+  PanelLeft,
   Eye,
   EyeOff,
   Languages,
@@ -33,6 +34,8 @@ type SettingsMainGridProps = {
   onImageCompressionThresholdChange: (value: number) => void;
   editorAutoHide: boolean;
   onEditorAutoHideChange: (enabled: boolean) => void;
+  compactSidebar: boolean;
+  onCompactSidebarChange: (enabled: boolean) => void;
   updateChannel: api.UpdateChannel;
   updateInfo: api.UpdateInfo | null;
   updateLoading: boolean;
@@ -51,6 +54,8 @@ export const SettingsMainGrid = ({
   onImageCompressionThresholdChange,
   editorAutoHide,
   onEditorAutoHideChange,
+  compactSidebar,
+  onCompactSidebarChange,
   updateChannel,
   updateInfo,
   updateLoading,
@@ -105,6 +110,19 @@ export const SettingsMainGrid = ({
           checked={editorAutoHide}
           onChange={onEditorAutoHideChange}
           ariaLabel="Toggle editor header auto-hide default"
+        />
+      </SettingsRow>
+
+      <SettingsRow
+        icon={<PanelLeft size={20} />}
+        tileClassName="border-black bg-violet-400 text-black dark:border-neutral-700 dark:bg-violet-400 dark:text-black"
+        title="Compact sidebar"
+        description="Keep account actions in the avatar menu"
+      >
+        <PlayfulSwitch
+          checked={compactSidebar}
+          onChange={onCompactSidebarChange}
+          ariaLabel="Toggle compact sidebar"
         />
       </SettingsRow>
 

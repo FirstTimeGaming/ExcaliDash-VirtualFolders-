@@ -4,6 +4,7 @@ import { Prisma } from "../generated/client";
 import { logAuditEvent } from "../utils/audit";
 import type { RegisterAdminRoutesDeps } from "./adminRoutes";
 import { registerAdminUserPasswordRoutes } from "./adminUserPasswordRoutes";
+import { BOOTSTRAP_USER_ID } from "./authMode";
 import {
   adminCreateUserSchema,
   adminRoleUpdateSchema,
@@ -41,6 +42,12 @@ export const registerAdminUserRoutes = (deps: RegisterAdminRoutesDeps) => {
         return res
           .status(404)
           .json({ error: "Not found", message: "User not found" });
+      }
+      if (target.id === BOOTSTRAP_USER_ID && parsed.data.role !== "ADMIN") {
+        return res.status(409).json({
+          error: "Conflict",
+          message: "The bootstrap account must remain an admin",
+        });
       }
       if (target.id === req.user.id && parsed.data.role !== "ADMIN") {
         return res.status(409).json({
@@ -255,6 +262,12 @@ export const registerAdminUserRoutes = (deps: RegisterAdminRoutesDeps) => {
           typeof parsed.data.role === "undefined"
             ? current.role
             : parsed.data.role;
+        if (current.id === BOOTSTRAP_USER_ID && nextRole !== "ADMIN") {
+          return res.status(409).json({
+            error: "Conflict",
+            message: "The bootstrap account must remain an admin",
+          });
+        }
         const nextActive =
           typeof parsed.data.isActive === "undefined"
             ? current.isActive
