@@ -35,26 +35,47 @@ export const CollectionPicker: React.FC<CollectionPickerProps> = ({
     : "Unorganized";
 
   return (
-    <div className="relative" onClick={(e) => e.stopPropagation()}>
+    <div onClick={(e) => e.stopPropagation()}>
       <div className="flex items-center gap-1 flex-wrap justify-start xs:justify-end">
-        <button
-          onClick={() => {
-            if (isShared || isSharedCollection) return;
-            onToggle();
-          }}
-          data-testid={`collection-picker-${drawing.id}`}
-          aria-haspopup="listbox"
-          aria-expanded={isOpen}
-          disabled={isShared || isSharedCollection}
-          className={clsx(
-            "max-w-[120px] truncate rounded-md border px-2 py-0.5 text-[10px] font-semibold transition-all",
-            isShared || isSharedCollection
-              ? "bg-slate-50 dark:bg-neutral-800/40 text-slate-400 dark:text-neutral-500 border-neutral-100 dark:border-neutral-800 cursor-not-allowed"
-              : "bg-slate-50 dark:bg-neutral-800 text-slate-500 dark:text-neutral-400 cursor-pointer border-neutral-200/60 dark:border-neutral-700 hover:border-neutral-300 dark:hover:border-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-700/50",
+        <div className="relative">
+          <button
+            onClick={() => {
+              if (isShared || isSharedCollection) return;
+              onToggle();
+            }}
+            data-testid={`collection-picker-${drawing.id}`}
+            aria-haspopup="listbox"
+            aria-expanded={isOpen}
+            disabled={isShared || isSharedCollection}
+            className={clsx(
+              "max-w-[120px] truncate rounded-md border px-2 py-0.5 text-[10px] font-semibold transition-all",
+              isShared || isSharedCollection
+                ? "bg-slate-50 dark:bg-neutral-800/40 text-slate-400 dark:text-neutral-500 border-neutral-100 dark:border-neutral-800 cursor-not-allowed"
+                : "bg-slate-50 dark:bg-neutral-800 text-slate-500 dark:text-neutral-400 cursor-pointer border-neutral-200/60 dark:border-neutral-700 hover:border-neutral-300 dark:hover:border-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-700/50",
+            )}
+          >
+            {isShared ? "Shared" : collectionName}
+          </button>
+
+          {!isShared && isOpen && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={onClose} />
+              <div className="ui-menu absolute left-0 xs:left-auto xs:right-0 bottom-full mb-1.5 w-48 z-20 max-h-56 overflow-y-auto custom-scrollbar animate-in fade-in slide-in-from-bottom-2 duration-150">
+                <CollectionMoveOptions
+                  collections={collections}
+                  currentCollectionId={drawing.collectionId}
+                  drawingId={drawing.id}
+                  onMoveToCollection={onMoveToCollection}
+                  onDone={onClose}
+                  optionClassName="ui-menu-item justify-between text-xs"
+                  selectedClassName="ui-menu-item-selected"
+                  unselectedClassName=""
+                  checkSize={12}
+                />
+              </div>
+            </>
           )}
-        >
-          {isShared ? "Shared" : collectionName}
-        </button>
+        </div>
 
         {showOwner && drawing.creatorName && (
           <span
@@ -80,25 +101,6 @@ export const CollectionPicker: React.FC<CollectionPickerProps> = ({
             </span>
           )}
       </div>
-
-      {!isShared && isOpen && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={onClose} />
-          <div className="ui-menu absolute right-0 bottom-full mb-1.5 w-48 z-20 max-h-56 overflow-y-auto custom-scrollbar animate-in fade-in slide-in-from-bottom-2 duration-150">
-            <CollectionMoveOptions
-              collections={collections}
-              currentCollectionId={drawing.collectionId}
-              drawingId={drawing.id}
-              onMoveToCollection={onMoveToCollection}
-              onDone={onClose}
-              optionClassName="ui-menu-item justify-between text-xs"
-              selectedClassName="ui-menu-item-selected"
-              unselectedClassName=""
-              checkSize={12}
-            />
-          </div>
-        </>
-      )}
     </div>
   );
 };
