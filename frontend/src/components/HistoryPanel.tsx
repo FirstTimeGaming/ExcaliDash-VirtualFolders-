@@ -10,7 +10,8 @@ type Props = {
   getCurrentVersion: () => number | null;
   isOpen: boolean;
   onClose: () => void;
-  onRestore: (snapshot: api.DrawingSnapshotFull) => void;
+  onRestoreSnapshot: (snapshotId: string) => Promise<void>;
+  onRestore: () => void;
   onPreview: (snapshot: api.DrawingSnapshotFull | null) => void;
 };
 
@@ -32,6 +33,7 @@ export const HistoryPanel: React.FC<Props> = ({
   isOpen,
   onClose,
   onRestore,
+  onRestoreSnapshot,
   onPreview,
 }) => {
   const [snapshots, setSnapshots] = useState<api.DrawingSnapshotSummary[]>([]);
@@ -107,6 +109,7 @@ export const HistoryPanel: React.FC<Props> = ({
   }, [anchorRef, isOpen]);
 
   const handlePreview = async (snapshotId: string) => {
+    if (restoring) return;
     if (previewId === snapshotId) {
       // Toggle off — restore current canvas
       previewRequestSequence.current += 1;
@@ -141,23 +144,19 @@ export const HistoryPanel: React.FC<Props> = ({
   };
 
   const handleRestore = async (snapshotId: string) => {
+    if (restoring) return;
     if (confirmRestore !== snapshotId) {
       setConfirmRestore(snapshotId);
       return;
     }
     setRestoring(true);
     try {
-      // Fetch full snapshot if not already loaded
-      let data = previewData;
-      if (!data || data.id !== snapshotId) {
-        data = await api.getDrawingSnapshot(drawingId, snapshotId);
-      }
       const version = getCurrentVersion();
       if (version === null) {
         throw new Error("Drawing is still loading. Please try again.");
       }
-      await api.restoreDrawingSnapshot(drawingId, snapshotId);
-      onRestore(data);
+      await onRestoreSnapshot(snapshotId);
+      onRestore();
       onClose();
     } catch {
       // ignore
@@ -177,7 +176,9 @@ export const HistoryPanel: React.FC<Props> = ({
           "fixed inset-0 z-[150] bg-transparent",
           previewData && "pointer-events-none",
         )}
-        onClick={onClose}
+        onClick={() => {
+          if (!restoring) onClose();
+        }}
         aria-hidden="true"
       />
       <div
@@ -201,7 +202,10 @@ export const HistoryPanel: React.FC<Props> = ({
             </span>
           )}
           <button
-            onClick={onClose}
+            onClick={() => {
+              if (!restoring) onClose();
+            }}
+            disabled={restoring}
             aria-label="Close version history"
             className="ui-icon-button ml-auto h-8 w-8 border-transparent bg-transparent shadow-none hover:border-slate-200 dark:bg-transparent dark:hover:border-neutral-700"
           >

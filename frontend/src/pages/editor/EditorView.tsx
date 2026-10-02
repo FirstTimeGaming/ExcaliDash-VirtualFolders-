@@ -1,4 +1,6 @@
 import React from "react";
+import type { DrawingSnapshotFull } from "../../api";
+import { HistoryPreviewCanvas } from "./HistoryPreviewCanvas";
 import { Excalidraw, MainMenu } from "@excalidraw/excalidraw";
 import {
   ArrowLeft,
@@ -34,7 +36,9 @@ type EditorViewProps = {
   initialData: any;
   isHeaderVisible: boolean;
   isHistoryOpen: boolean;
+  historyPreview: DrawingSnapshotFull | null;
   historyButtonRef: React.RefObject<HTMLButtonElement>;
+  shareButtonRef: React.RefObject<HTMLButtonElement>;
   isRenaming: boolean;
   isSavingOnLeave: boolean;
   isSceneLoading: boolean;
@@ -106,7 +110,9 @@ export const EditorView: React.FC<EditorViewProps> = ({
   initialData,
   isHeaderVisible,
   isHistoryOpen,
+  historyPreview,
   historyButtonRef,
+  shareButtonRef,
   isRenaming,
   isSavingOnLeave,
   isSceneLoading,
@@ -151,7 +157,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
     <header
       className={clsx(
         "h-16 bg-white dark:bg-neutral-900 border-b border-gray-200 dark:border-neutral-800 flex items-center px-4 justify-between z-10 fixed top-0 left-0 right-0 transition-all duration-300",
-        isHeaderVisible ? "translate-y-0" : "-translate-y-full",
+        isHeaderVisible || isShareOpen ? "translate-y-0" : "-translate-y-full",
       )}
     >
       <div className="flex items-center gap-4">
@@ -219,18 +225,13 @@ export const EditorView: React.FC<EditorViewProps> = ({
         {accessLevel === "owner" && id ? (
           <div className="relative inline-flex">
             <button
+              ref={shareButtonRef}
               onClick={onShareOpen}
               className="ui-toolbar-button"
               title="Share"
             >
               <Share2 size={20} />
             </button>
-            <ShareModal
-              drawingId={id}
-              drawingName={drawingName}
-              isOpen={isShareOpen}
-              onClose={onCloseShare}
-            />
           </div>
         ) : null}
         <button
@@ -273,10 +274,26 @@ export const EditorView: React.FC<EditorViewProps> = ({
         </div>
       </div>
     </header>
+    {accessLevel === "owner" && id ? (
+      <ShareModal
+        drawingId={id}
+        drawingName={drawingName}
+        isOpen={isShareOpen}
+        onClose={onCloseShare}
+        anchorRef={shareButtonRef}
+      />
+    ) : null}
     <div
       ref={editorContainerRef}
       className="relative w-full flex-1"
-      onDropCapture={onCanvasDropCapture}
+      onDropCapture={(event) => {
+        if (isHistoryOpen) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        onCanvasDropCapture(event);
+      }}
       style={{
         height: isHeaderVisible ? "calc(100vh - 4rem)" : "100vh",
         marginTop: isHeaderVisible ? "4rem" : "0",
@@ -334,6 +351,13 @@ export const EditorView: React.FC<EditorViewProps> = ({
           </span>
         </div>
       )}
+      {historyPreview ? (
+        <HistoryPreviewCanvas
+          snapshot={historyPreview}
+          theme={theme}
+          langCode={langCode}
+        />
+      ) : null}
       <Toaster position="bottom-center" />
     </div>
   </div>

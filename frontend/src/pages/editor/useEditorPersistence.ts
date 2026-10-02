@@ -78,6 +78,8 @@ export const useEditorPersistence = ({
   normalizeImageElementStatus,
   resolveSafeSnapshot,
 }: UseEditorPersistenceParams) => {
+  const historyRestorePendingRef = useRef(false);
+  const pendingPreviewSavesRef = useRef(new Set<Promise<void>>());
   const canEditRef = useRef(canEdit);
   useLayoutEffect(() => {
     canEditRef.current = canEdit;
@@ -259,6 +261,9 @@ export const useEditorPersistence = ({
       files?: Record<string, any>,
       options?: { suppressErrors?: boolean },
     ) => {
+      // Restore owns the scene until reload (or failure). Existing saves may
+      // drain, but late broadcast/file timers must not enqueue another save.
+      if (historyRestorePendingRef.current) return Promise.resolve();
       const suppressErrors = options?.suppressErrors ?? true;
       refs.saveQueue.current = refs.saveQueue.current
         .catch(() => undefined)
@@ -290,13 +295,14 @@ export const useEditorPersistence = ({
     [refs],
   );
 
-  savePreviewRef.current = async (
+  const savePreview = async (
     drawingId: string,
     elements: readonly any[],
     appState: any,
     files: any,
   ) => {
-    if (!canEditRef.current || !drawingId) return;
+    if (!canEditRef.current || !drawingId || historyRestorePendingRef.current)
+      return;
     try {
       const snapshotFromArgs = Array.isArray(elements) ? elements : [];
       const snapshotFromRef = refs.latestElements.current ?? [];
@@ -338,11 +344,20 @@ export const useEditorPersistence = ({
         },
         files: currentFiles,
       });
-      if (!canEditRef.current) return;
+      if (!canEditRef.current || historyRestorePendingRef.current) return;
       await api.updateDrawing(drawingId, { preview: svg.outerHTML });
     } catch (err) {
       console.error("Failed to save preview", err);
     }
+  };
+
+  savePreviewRef.current = (...args) => {
+    const pendingSave = savePreview(...args);
+    pendingPreviewSavesRef.current.add(pendingSave);
+    void pendingSave.finally(() =>
+      pendingPreviewSavesRef.current.delete(pendingSave),
+    );
+    return pendingSave;
   };
 
   saveLibraryRef.current = async (items: any[]) => {
@@ -413,8 +428,40 @@ export const useEditorPersistence = ({
     };
   }, [debouncedSave, debouncedSaveLibrary, debouncedSavePreview]);
 
+  const runHistoryRestore = useCallback(
+    async (drawingId: string, restore: () => Promise<unknown>) => {
+      if (historyRestorePendingRef.current) return;
+      // Save the live API snapshot before locking, including edits still waiting
+      // in the broadcast throttle. A stale debounce must not replace this backup.
+      debouncedSave.cancel();
+      const editor = refs.excalidrawAPI.current;
+      if (!editor) throw new Error("Drawing is still loading");
+      const finalLiveSave = enqueueSceneSave(
+        drawingId,
+        editor.getSceneElementsIncludingDeleted(),
+        editor.getAppState(),
+        editor.getFiles() || {},
+        { suppressErrors: false },
+      );
+      historyRestorePendingRef.current = true;
+      debouncedSavePreview.cancel();
+      try {
+        await finalLiveSave;
+        await Promise.all(pendingPreviewSavesRef.current);
+        await restore();
+        // Keep writes blocked through reload, including pagehide/unmount flushes.
+      } catch (error) {
+        historyRestorePendingRef.current = false;
+        throw error;
+      }
+    },
+    [debouncedSave, debouncedSavePreview, enqueueSceneSave, refs],
+  );
+
   return {
     autosaveFailing,
+    historyRestorePendingRef,
+    runHistoryRestore,
     debouncedSave,
     debouncedSaveLibrary,
     debouncedSavePreview,

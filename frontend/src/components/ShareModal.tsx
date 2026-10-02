@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import clsx from "clsx";
 import {
   Link as LinkIcon,
@@ -17,13 +18,37 @@ import {
 } from "./share-modal/shareUtils";
 
 type Props = {
+  anchorRef: React.RefObject<HTMLElement>;
   drawingId: string;
   drawingName: string;
   isOpen: boolean;
   onClose: () => void;
 };
 
-export const ShareModal: React.FC<Props> = ({ drawingId, isOpen, onClose }) => {
+export const ShareModal: React.FC<Props> = ({
+  drawingId,
+  isOpen,
+  onClose,
+  anchorRef,
+}) => {
+  const [position, setPosition] = useState({ right: 12, top: 72 });
+  useEffect(() => {
+    if (!isOpen) return;
+    const updatePosition = () => {
+      const rect = anchorRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setPosition({
+        right: Math.max(
+          12,
+          Math.min(window.innerWidth - rect.right, window.innerWidth - 472),
+        ),
+        top: rect.bottom + 8,
+      });
+    };
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    return () => window.removeEventListener("resize", updatePosition);
+  }, [anchorRef, isOpen]);
   const { user } = useAuth();
   const currentUserId = user?.id || null;
   const [isLoading, setIsLoading] = useState(false);
@@ -270,7 +295,7 @@ export const ShareModal: React.FC<Props> = ({ drawingId, isOpen, onClose }) => {
   if (!isOpen) return null;
   const currentLinkUrl = activeLink ? shareableEditorUrl : "";
 
-  return (
+  return createPortal(
     <>
       {/* Click-outside backdrop (completely transparent, no blur) */}
       <div
@@ -279,7 +304,12 @@ export const ShareModal: React.FC<Props> = ({ drawingId, isOpen, onClose }) => {
       />
 
       {/* The popover container positioned under the share button */}
-      <div className="absolute right-0 top-full mt-2 z-[160] flex max-h-[calc(100dvh-5rem)] w-[min(460px,calc(100vw-24px))] flex-col overflow-hidden rounded-2xl border-2 border-slate-800 bg-white font-sans shadow-[3px_3px_0px_0px_rgba(30,41,59,0.9)] animate-in fade-in slide-in-from-top-3 duration-200 dark:border-neutral-600 dark:bg-neutral-900 dark:shadow-[3px_3px_0px_0px_rgba(255,255,255,0.18)]">
+      <div
+        style={position}
+        role="dialog"
+        aria-label="Share drawing"
+        className="fixed z-[160] flex max-h-[calc(100dvh-5rem)] w-[min(460px,calc(100vw-24px))] flex-col overflow-hidden rounded-2xl border-2 border-slate-800 bg-white font-sans shadow-[3px_3px_0px_0px_rgba(30,41,59,0.9)] animate-in fade-in slide-in-from-top-3 duration-200 dark:border-neutral-600 dark:bg-neutral-900 dark:shadow-[3px_3px_0px_0px_rgba(255,255,255,0.18)]"
+      >
         {/* Content */}
         <div className="custom-scrollbar min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
           {error && (
@@ -351,6 +381,7 @@ export const ShareModal: React.FC<Props> = ({ drawingId, isOpen, onClose }) => {
           </div>
         )}
       </div>
-    </>
+    </>,
+    document.body,
   );
 };

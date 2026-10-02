@@ -13,6 +13,7 @@ import type { UploadedFileRefs } from "./shared";
 import { saveDrawingKeepalive } from "./keepaliveSave";
 
 type EditorCommandRefs = {
+  historyRestorePending: MutableRefObject<boolean>;
   currentDrawingVersion: MutableRefObject<number | null>;
   excalidrawAPI: MutableRefObject<any>;
   hasSceneChangesSinceLoad: MutableRefObject<boolean>;
@@ -95,7 +96,7 @@ export const useEditorCommands = ({
     const handleKeyDown = async (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault();
-        if (!canEdit) return;
+        if (!canEdit || refs.historyRestorePending.current) return;
         if (!(
           refs.excalidrawAPI.current &&
           refs.saveData.current &&
@@ -132,7 +133,7 @@ export const useEditorCommands = ({
     // autosave may have pending edits that would otherwise be lost; a
     // keepalive PUT survives the unload where the normal save pipeline can't.
     const handlePageHide = () => {
-      if (!canEdit || !drawingId) return;
+      if (!canEdit || !drawingId || refs.historyRestorePending.current) return;
       const editor = refs.excalidrawAPI.current;
       if (!editor) return;
       if (!refs.hasSceneChangesSinceLoad.current) return;
@@ -162,7 +163,7 @@ export const useEditorCommands = ({
   const handleRenameSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault();
-      if (!canEdit || !drawingId) return;
+      if (!canEdit || !drawingId || refs.historyRestorePending.current) return;
       const trimmed = newName.trim();
       // Empty or unchanged name: just close the editor, save nothing.
       if (!trimmed || trimmed === drawingName) {
@@ -188,6 +189,7 @@ export const useEditorCommands = ({
       drawingId,
       drawingName,
       newName,
+      refs,
       setDrawingName,
       setIsRenaming,
       setNewName,
@@ -203,7 +205,7 @@ export const useEditorCommands = ({
   );
 
   const handleBackClick = useCallback(async () => {
-    if (isSavingOnLeave) return;
+    if (isSavingOnLeave || refs.historyRestorePending.current) return;
     setIsSavingOnLeave(true);
     let shouldNavigate = false;
     try {
