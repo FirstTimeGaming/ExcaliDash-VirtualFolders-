@@ -7,7 +7,7 @@ import {
   rehydratePreviewSvg,
   previewHasOrphanedImages,
 } from "../../utils/previewSvg";
-import { rehydrateFilesForExport } from "../../utils/rehydrateFiles";
+import { rehydrateFilesFromUrls } from "../../utils/rehydrateFiles";
 import * as api from "../../api";
 
 export type HydratedDrawingData = {
@@ -62,10 +62,10 @@ export const useDrawingPreview = (
     return (): Promise<HydratedDrawingData> => {
       promise ??= api
         .getDrawing(drawing.id)
-        .then(async (fullDrawing) => ({
+        .then((fullDrawing) => ({
           elements: fullDrawing.elements || [],
           appState: fullDrawing.appState || {},
-          files: await rehydrateFilesForExport(fullDrawing.files, drawing.id),
+          files: fullDrawing.files || {},
         }))
         .catch((error) => {
           promise = null;
@@ -111,14 +111,25 @@ export const useDrawingPreview = (
         if (cancelled) return;
         if (!data?.elements || !data?.appState) return;
 
+        // Ignore old, unreferenced file entries. A deleted image or a failed
+        // file fetch must not prevent the rest of the thumbnail from rendering.
+        const fileIds = new Set(
+          data.elements
+            .filter((element) => element.type === "image" && !element.isDeleted)
+            .map((element) => element.fileId),
+        );
+        const files = await rehydrateFilesFromUrls(
+          Object.fromEntries(
+            Object.entries(data.files).filter(([fileId]) =>
+              fileIds.has(fileId),
+            ),
+          ),
+        );
         const { exportToSvg } = await import("@excalidraw/excalidraw");
         if (cancelled) return;
 
         const svg = await exportToSvg({
-          elements: normalizeImageElementsForPreview(
-            data.elements,
-            data.files || {},
-          ),
+          elements: normalizeImageElementsForPreview(data.elements, files),
           appState: {
             ...data.appState,
             exportWithDarkMode: false,
@@ -127,7 +138,7 @@ export const useDrawingPreview = (
             ),
             viewBackgroundColor: data.appState.viewBackgroundColor || "#ffffff",
           },
-          files: data.files || {},
+          files,
           exportPadding: 10,
         });
 
