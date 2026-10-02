@@ -74,6 +74,11 @@ jobs:
       - name: Check formatting and lint
         run: npm run check
 
+      - name: Run frontend unit and lab configuration tests
+        run: |
+          npm --prefix frontend run test:unit
+          node --test scripts/lab-frontend-ports.test.mjs
+
       - name: Build documentation
         run: npm run docs:build
 
