@@ -131,7 +131,7 @@ services:
   frontend-basic:
     <<: *frontend-common
     ports:
-      - "1101:80"
+      - "1101:8080"
     environment:
       BACKEND_URL: backend-basic:8000
     depends_on:
@@ -165,7 +165,7 @@ services:
   frontend-basic-seaweed:
     <<: *frontend-common
     ports:
-      - "1102:80"
+      - "1102:8080"
     environment:
       BACKEND_URL: backend-basic-seaweed:8000
     depends_on:
@@ -200,7 +200,7 @@ services:
   frontend-oidc:
     <<: *frontend-common
     ports:
-      - "1103:80"
+      - "1103:8080"
     environment:
       BACKEND_URL: backend-oidc:8000
     depends_on:
@@ -235,7 +235,7 @@ services:
   frontend-hybrid:
     <<: *frontend-common
     ports:
-      - "1104:80"
+      - "1104:8080"
     environment:
       BACKEND_URL: backend-hybrid:8000
     depends_on:
@@ -259,7 +259,7 @@ services:
   frontend-trusted-proxy:
     <<: *frontend-common
     ports:
-      - "1105:80"
+      - "1105:8080"
     environment:
       BACKEND_URL: backend-trusted-proxy:8000
     depends_on:
