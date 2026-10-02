@@ -4,7 +4,10 @@ import {
   normalizePreviewSvg,
   isDefaultPreviewBackground,
   previewHasEmbeddedImages,
+  rehydratePreviewSvg,
+  previewHasOrphanedImages,
 } from "../../utils/previewSvg";
+import { rehydrateFilesForExport } from "../../utils/rehydrateFiles";
 import * as api from "../../api";
 
 export type HydratedDrawingData = {
@@ -59,10 +62,10 @@ export const useDrawingPreview = (
     return (): Promise<HydratedDrawingData> => {
       promise ??= api
         .getDrawing(drawing.id)
-        .then((fullDrawing) => ({
+        .then(async (fullDrawing) => ({
           elements: fullDrawing.elements || [],
           appState: fullDrawing.appState || {},
-          files: fullDrawing.files || {},
+          files: await rehydrateFilesForExport(fullDrawing.files, drawing.id),
         }))
         .catch((error) => {
           promise = null;
@@ -77,9 +80,6 @@ export const useDrawingPreview = (
   useEffect(() => {
     let cancelled = false;
     setPreviewSvg(normalizePreviewSvg(drawing.preview) ?? null);
-    if (drawing.preview) {
-      return;
-    }
     if (!loadPreview) {
       return;
     }
@@ -89,11 +89,16 @@ export const useDrawingPreview = (
       // client-side generation (which fetches full data) when the server has
       // no stored preview for this drawing.
       try {
-        const stored = await api.getDrawingPreview(drawing.id);
+        const stored =
+          drawing.preview || (await api.getDrawingPreview(drawing.id));
         if (cancelled) return;
-        if (stored) {
-          setPreviewSvg(stored);
-          onPreviewGeneratedRef.current?.(drawing.id, stored);
+        if (stored && !previewHasOrphanedImages(stored)) {
+          const hydrated = await rehydratePreviewSvg(stored);
+          if (cancelled) return;
+          setPreviewSvg(hydrated);
+          if (hydrated !== drawing.preview) {
+            onPreviewGeneratedRef.current?.(drawing.id, hydrated);
+          }
           return;
         }
       } catch {

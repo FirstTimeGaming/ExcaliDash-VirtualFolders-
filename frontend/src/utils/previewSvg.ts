@@ -77,6 +77,36 @@ export const previewHasEmbeddedImages = (
   preview: string | null | undefined,
 ): boolean => typeof preview === "string" && /<image[\s>]/i.test(preview);
 
+export const previewHasOrphanedImages = (preview: string): boolean => {
+  const doc = new DOMParser().parseFromString(preview, "image/svg+xml");
+  // Older sanitization removed Excalidraw's symbol/use pairs but left their
+  // images in defs. Those thumbnails must be rebuilt from the actual scene.
+  return doc.querySelector("defs > image") !== null;
+};
+
+// SVG image references need inline bytes to render reliably in thumbnails,
+// including files served through an authenticated endpoint or S3 redirect.
+export const rehydratePreviewSvg = async (preview: string): Promise<string> => {
+  const doc = new DOMParser().parseFromString(preview, "image/svg+xml");
+  if (doc.documentElement.tagName.toLowerCase() !== "svg") return preview;
+  const images = Array.from(doc.querySelectorAll("image"));
+  const files = Object.fromEntries(
+    images.map((image, index) => [
+      String(index),
+      {
+        dataURL: image.getAttribute("href") || image.getAttribute("xlink:href"),
+      },
+    ]),
+  );
+  const hydrated = await rehydrateFilesFromUrls(files);
+  for (const [index, file] of Object.entries(hydrated)) {
+    if (!file.dataURL?.startsWith("data:image/")) continue;
+    images[Number(index)].setAttribute("href", file.dataURL);
+    images[Number(index)].removeAttribute("xlink:href");
+  }
+  return normalizePreviewSvg(doc.documentElement.outerHTML) ?? preview;
+};
+
 export const normalizePreviewSvg = (
   preview: string | null | undefined,
 ): string | null => {
@@ -174,3 +204,4 @@ export const normalizePreviewSvg = (
     return preview;
   }
 };
+import { rehydrateFilesFromUrls } from "./rehydrateFiles";

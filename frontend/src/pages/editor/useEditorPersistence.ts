@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { MutableRefObject } from "react";
 import { exportToSvg } from "@excalidraw/excalidraw";
 import debounce from "lodash/debounce";
@@ -49,6 +56,7 @@ type PersistenceRefs = {
 };
 
 type UseEditorPersistenceParams = {
+  canEdit: boolean;
   refs: PersistenceRefs;
   user: unknown;
   normalizeImageElementStatus: (
@@ -64,11 +72,16 @@ type UseEditorPersistenceParams = {
 };
 
 export const useEditorPersistence = ({
+  canEdit,
   refs,
   user,
   normalizeImageElementStatus,
   resolveSafeSnapshot,
 }: UseEditorPersistenceParams) => {
+  const canEditRef = useRef(canEdit);
+  useLayoutEffect(() => {
+    canEditRef.current = canEdit;
+  }, [canEdit]);
   const saveDataRef = useRef<
     | ((
         drawingId: string,
@@ -97,7 +110,7 @@ export const useEditorPersistence = ({
     appState: any,
     files?: Record<string, any>,
   ) => {
-    if (!drawingId) return;
+    if (!canEditRef.current || !drawingId) return;
     try {
       const persistableAppState = getPersistedAppState(appState);
       const candidateElements = Array.isArray(elements) ? elements : [];
@@ -133,6 +146,7 @@ export const useEditorPersistence = ({
       const editorFilesBeforeCompression = persistableFiles;
       const compressedFilesResult =
         await compressExcalidrawFiles(persistableFiles);
+      if (!canEditRef.current) return;
       if (compressedFilesResult.changed) {
         persistableFiles = compressedFilesResult.files;
         if (
@@ -177,6 +191,7 @@ export const useEditorPersistence = ({
         filesToSave: Record<string, any>,
         sendFiles: boolean,
       ): Promise<void> => {
+        if (!canEditRef.current) return;
         try {
           const updated = await api.updateDrawing(drawingId, {
             elements: Array.from(elementsToSave),
@@ -281,7 +296,7 @@ export const useEditorPersistence = ({
     appState: any,
     files: any,
   ) => {
-    if (!drawingId) return;
+    if (!canEditRef.current || !drawingId) return;
     try {
       const snapshotFromArgs = Array.isArray(elements) ? elements : [];
       const snapshotFromRef = refs.latestElements.current ?? [];
@@ -323,6 +338,7 @@ export const useEditorPersistence = ({
         },
         files: currentFiles,
       });
+      if (!canEditRef.current) return;
       await api.updateDrawing(drawingId, { preview: svg.outerHTML });
     } catch (err) {
       console.error("Failed to save preview", err);

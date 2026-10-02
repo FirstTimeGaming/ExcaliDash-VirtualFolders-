@@ -73,14 +73,19 @@ export const sanitizeSvg = (svgContent: string): string => {
   const isSafeImageHref = (href: string): boolean =>
     safeImageDataUrlPattern.test(href) || API_FILE_REF.test(href);
   const sanitizeSvgImageTags = (content: string): string =>
-    content.replace(/<image\b[^>]*>/gi, (imageTag) => {
+    content.replace(/<(image|use)\b[^>]*>/gi, (imageTag, tag: string) => {
       const hrefMatch =
         imageTag.match(/\shref\s*=\s*"([^"]*)"/i) ??
         imageTag.match(/\shref\s*=\s*'([^']*)'/i) ??
         imageTag.match(/\sxlink:href\s*=\s*"([^"]*)"/i) ??
         imageTag.match(/\sxlink:href\s*=\s*'([^']*)'/i);
       const hrefValue = hrefMatch?.[1]?.trim();
-      if (!hrefValue || !isSafeImageHref(hrefValue)) {
+      const safeHref =
+        hrefValue &&
+        (tag.toLowerCase() === "use"
+          ? /^#[\w-]+$/.test(hrefValue)
+          : isSafeImageHref(hrefValue));
+      if (!safeHref) {
         return "";
       }
       const withoutXlinkHref = imageTag.replace(
@@ -94,8 +99,8 @@ export const sanitizeSvg = (svgContent: string): string => {
         );
       }
       return withoutXlinkHref.replace(
-        /<image\b/i,
-        `<image href="${hrefValue}"`,
+        /<(image|use)\b/i,
+        `<$1 href="${hrefValue}"`,
       );
     });
   const sanitized = purify
@@ -106,6 +111,10 @@ export const sanitizeSvg = (svgContent: string): string => {
         "pattern",
         "g",
         "image",
+        "symbol",
+        "use",
+        "clipPath",
+        "mask",
         "rect",
         "circle",
         "ellipse",
@@ -151,6 +160,11 @@ export const sanitizeSvg = (svgContent: string): string => {
         "stroke-dashoffset",
         "opacity",
         "transform",
+        "clip-path",
+        "mask",
+        "clipPathUnits",
+        "maskUnits",
+        "maskContentUnits",
         "vector-effect",
         "patternUnits",
         "patternContentUnits",
@@ -169,13 +183,9 @@ export const sanitizeSvg = (svgContent: string): string => {
         "iframe",
         "object",
         "embed",
-        "use",
         "style",
         "link",
-        "symbol",
         "marker",
-        "clipPath",
-        "mask",
         "filter",
       ],
       FORBID_ATTR: [
@@ -193,7 +203,13 @@ export const sanitizeSvg = (svgContent: string): string => {
       KEEP_CONTENT: true,
     })
     .trim();
-  return sanitizeSvgImageTags(sanitized).trim();
+  // Crop/frame masks only refer to local SVG geometry, never external URLs.
+  const localReferences = sanitized.replace(
+    /\s(?:clip-path|mask)="([^"]*)"/gi,
+    (attribute, value: string) =>
+      /^url\(#[\w-]+\)$/.test(value) ? attribute : "",
+  );
+  return sanitizeSvgImageTags(localReferences).trim();
 };
 export const sanitizeText = (
   input: unknown,

@@ -212,3 +212,67 @@ test("a rejected stale save leaves the accepted scene and version intact", async
     await deleteDrawing(request, drawing.id);
   }
 });
+
+test("opening an image through a view-only link never attempts to save or upload", async ({
+  page,
+  request,
+}) => {
+  await apiSignIn(request);
+  const drawing = await createDrawing(request, {
+    name: `Read-only images ${Date.now()}`,
+    elements: [
+      {
+        id: "readonly-image",
+        type: "image",
+        fileId: "readonly-file",
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 100,
+        scale: [1, 1],
+        status: "saved",
+      },
+    ],
+    files: {
+      "readonly-file": {
+        id: "readonly-file",
+        mimeType: "image/png",
+        dataURL:
+          "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/58BAwAI/AL+hc2rNAAAAABJRU5ErkJggg==",
+        created: Date.now(),
+      },
+    },
+  });
+  try {
+    const shared = await request.post(
+      `${API_URL}/drawings/${drawing.id}/link-shares`,
+      {
+        headers: await getCsrfHeaders(request),
+        data: { permission: "view" },
+      },
+    );
+    expect(shared.ok()).toBe(true);
+    const writes: string[] = [];
+    page.on("request", (r) => {
+      if (r.method() === "PUT" && r.url().includes(`/drawings/${drawing.id}`))
+        writes.push(r.url());
+    });
+    await page.goto(`/shared/${drawing.id}`);
+    await expect(
+      page.locator("canvas.excalidraw__canvas.interactive"),
+    ).toBeVisible();
+    // Cover both image upload (800ms) and file polling + autosave (2500ms + 1000ms).
+    await page.waitForTimeout(4500);
+    await page.keyboard.press("ControlOrMeta+s");
+    await page.goto("/");
+    expect(writes).toEqual([]);
+    expect((await getDrawing(request, drawing.id)).version).toBe(
+      drawing.version,
+    );
+    await expect(
+      page.getByText("Failed to save changes", { exact: true }),
+    ).toHaveCount(0);
+  } finally {
+    await deleteDrawing(request, drawing.id);
+  }
+});

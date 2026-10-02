@@ -267,4 +267,75 @@ describe("DrawingFile store (database-bytes mode)", () => {
 
     expect(res.status).toBe(200);
   });
+
+  it("rebases copied preview images so deleting the source keeps the copy usable", async () => {
+    const drawing = await createDrawing(owner.id);
+    await uploadFile(drawing.id, "img-copy", ownerToken, PNG_BYTES);
+    const sourceUrl = `/api/files/${drawing.id}/img-copy`;
+    await prisma.drawing.update({
+      where: { id: drawing.id },
+      data: {
+        files: JSON.stringify({
+          "img-copy": {
+            id: "img-copy",
+            mimeType: "image/png",
+            dataURL: sourceUrl,
+          },
+        }),
+        preview: `<svg xmlns="http://www.w3.org/2000/svg"><image href="${sourceUrl}" width="40" height="40"/></svg>`,
+      },
+    });
+    const copy = await agent
+      .post(`/drawings/${drawing.id}/duplicate`)
+      .set("User-Agent", userAgent)
+      .set(csrfHeaderName, csrfToken)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(copy.status).toBe(200);
+    const copyUrl = `/api/files/${copy.body.id}/img-copy`;
+    expect(copy.body.files["img-copy"].dataURL).toBe(copyUrl);
+    expect(copy.body.preview).toContain(`href="${copyUrl}"`);
+    expect(copy.body.preview).not.toContain(sourceUrl);
+
+    const deleted = await agent
+      .delete(`/drawings/${drawing.id}`)
+      .set("User-Agent", userAgent)
+      .set(csrfHeaderName, csrfToken)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(deleted.status).toBe(200);
+    const image = await agent
+      .get(`/files/${copy.body.id}/img-copy`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(image.status).toBe(200);
+    expect(Buffer.from(image.body).equals(PNG_BYTES)).toBe(true);
+  });
+
+  it("keeps Excalidraw image symbols and crops while stripping unsafe references", async () => {
+    const drawing = await createDrawing(owner.id);
+    const preview = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+      <defs><symbol id="image-test"><image href="${PNG_DATA_URL}" width="100%" height="100%"/></symbol></defs>
+      <mask id="crop"><rect width="50" height="50" fill="#fff"/></mask>
+      <g mask="url(#crop)"><use href="#image-test" width="100" height="100"/></g>
+      <use href="https://untrusted.example/image.svg#remote"/>
+      <use href="javascript:alert(1)"/>
+      <image href="javascript:alert(1)"/>
+      <g mask="url(https://untrusted.example/mask.svg#mask)"/>
+      <script>alert(1)</script>
+    </svg>`;
+    const saved = await agent
+      .put(`/drawings/${drawing.id}`)
+      .set("User-Agent", userAgent)
+      .set(csrfHeaderName, csrfToken)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ preview });
+    expect(saved.status).toBe(200);
+    const result = await agent
+      .get(`/drawings/${drawing.id}/preview`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(result.status).toBe(200);
+    expect(result.body.preview).toContain('<symbol id="image-test">');
+    expect(result.body.preview).toContain('<use href="#image-test"');
+    expect(result.body.preview).toContain('mask="url(#crop)"');
+    expect(result.body.preview).toContain(PNG_DATA_URL);
+    expect(result.body.preview).not.toMatch(/untrusted|javascript:|<script/);
+  });
 });

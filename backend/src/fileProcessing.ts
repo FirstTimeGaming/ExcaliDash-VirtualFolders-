@@ -188,6 +188,8 @@ export const internDrawingFiles = async (
  * already stored (the diff between Drawing.files's processed entries
  * and the preview field gets ever larger over time).
  *
+ * Also rebase managed references when duplicating a drawing so its preview
+ * remains usable after the source is deleted or stops being shared.
  * Best-effort string substitution: works because the same dataURL
  * string is character-identical in both `files[fileId].dataURL` and
  * the preview SVG's `<image href="...">` attribute. If frontend
@@ -210,8 +212,7 @@ export const rewritePreviewForInternedFiles = (
       !processed ||
       typeof original.dataURL !== "string" ||
       typeof processed.dataURL !== "string" ||
-      original.dataURL === processed.dataURL ||
-      !original.dataURL.startsWith("data:")
+      original.dataURL === processed.dataURL
     ) {
       continue;
     }

@@ -140,6 +140,7 @@ const ExcalidrawEditor: React.FC = () => {
       onAccessDenied: handleSocketAccessDenied,
     });
   const { scanNow: scanFileUploads } = useEditorFileUploads({
+    canEdit,
     drawingId: id,
     isReady,
     excalidrawAPI,
@@ -148,6 +149,7 @@ const ExcalidrawEditor: React.FC = () => {
     uploadedRefs: uploadedFileRefsRef,
   });
   const { emitFilesDeltaIfNeeded, setExcalidrawAPI } = useEditorSceneApi({
+    canEdit,
     drawingId: id,
     excalidrawAPIRef: excalidrawAPI,
     isSyncing,
@@ -194,6 +196,7 @@ const ExcalidrawEditor: React.FC = () => {
     saveDataRef,
     savePreviewRef,
   } = useEditorPersistence({
+    canEdit,
     refs: persistenceRefs,
     user,
     normalizeImageElementStatus,

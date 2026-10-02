@@ -93,21 +93,9 @@ export const rehydrateFilesFromUrls = async (
   if (!filesNeedRehydration(files)) return files;
 
   const result: Record<string, any> = { ...files };
-  const entries = Object.entries(files).filter(([, file]) =>
-    isRehydratableRef((file as any)?.dataURL),
-  );
-
-  await Promise.all(
-    entries.map(async ([fileId, file]) => {
-      const dataURL = await fetchAsDataUrl(
-        (file as any).dataURL,
-        (file as any)?.mimeType,
-      );
-      if (dataURL) {
-        result[fileId] = { ...(file as any), dataURL };
-      }
-    }),
-  );
+  await rehydrateFilesProgressive(files, (fileId, file) => {
+    result[fileId] = file;
+  });
 
   return result;
 };
