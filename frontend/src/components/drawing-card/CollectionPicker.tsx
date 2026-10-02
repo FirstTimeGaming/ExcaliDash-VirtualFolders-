@@ -2,6 +2,7 @@ import React from "react";
 import clsx from "clsx";
 import type { Collection, DrawingSummary } from "../../types";
 import { CollectionMoveOptions } from "./CollectionMoveOptions";
+import { useAuth } from "../../context/AuthContext";
 
 interface CollectionPickerProps {
   drawing: DrawingSummary;
@@ -24,6 +25,10 @@ export const CollectionPicker: React.FC<CollectionPickerProps> = ({
   onClose,
   onMoveToCollection,
 }) => {
+  const { user } = useAuth();
+  const showOwner = Boolean(
+    user && drawing.userId && drawing.userId !== user.id,
+  );
   const collectionName = drawing.collectionId
     ? collections.find((collection) => collection.id === drawing.collectionId)
         ?.name || "Collection"
@@ -51,7 +56,7 @@ export const CollectionPicker: React.FC<CollectionPickerProps> = ({
           {isShared ? "Shared" : collectionName}
         </button>
 
-        {drawing.creatorName && (
+        {showOwner && drawing.creatorName && (
           <span
             title={drawing.creatorName}
             className="max-w-[120px] truncate rounded-md border border-indigo-100 bg-indigo-50/50 px-2 py-0.5 text-[10px] font-semibold text-indigo-500 dark:border-indigo-900/50 dark:bg-indigo-900/10 dark:text-indigo-400"

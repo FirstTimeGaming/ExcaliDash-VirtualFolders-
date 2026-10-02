@@ -161,6 +161,7 @@ export const registerDrawingListRoutes = (
         version: true,
         createdAt: true,
         updatedAt: true,
+        userId: true,
         user: { select: { id: true, name: true } },
       };
 
@@ -177,7 +178,11 @@ export const registerDrawingListRoutes = (
         take: parsedLimit,
         skip: parsedOffset,
       };
-      if (!shouldIncludeData) queryOptions.select = summarySelect;
+      if (shouldIncludeData) {
+        queryOptions.include = { user: { select: { name: true } } };
+      } else {
+        queryOptions.select = summarySelect;
+      }
 
       const [drawings, totalCount] = await Promise.all([
         prisma.drawing.findMany(queryOptions),
@@ -345,6 +350,7 @@ export const registerDrawingListRoutes = (
         createdAt: true,
         updatedAt: true,
         userId: true,
+        user: { select: { name: true } },
         permissions: {
           where: { granteeUserId: req.user.id },
           select: { permission: true },
@@ -357,7 +363,11 @@ export const registerDrawingListRoutes = (
         take: parsedLimit,
         skip: parsedOffset,
       };
-      if (!shouldIncludeData) queryOptions.select = summarySelect;
+      if (shouldIncludeData) {
+        queryOptions.include = { user: { select: { name: true } } };
+      } else {
+        queryOptions.select = summarySelect;
+      }
 
       const [drawings, totalCount] = await Promise.all([
         prisma.drawing.findMany(queryOptions),
@@ -375,6 +385,8 @@ export const registerDrawingListRoutes = (
           // Collections are owner-scoped; don't leak the owner's collection ids to viewers.
           collectionId: null,
           accessLevel: perm,
+          creatorName: d.user?.name ?? null,
+          user: undefined,
         };
       };
 
