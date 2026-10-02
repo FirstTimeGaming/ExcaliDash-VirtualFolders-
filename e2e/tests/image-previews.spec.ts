@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { createDrawing, deleteDrawing, updateDrawing } from "./helpers/api";
 
 const dataURL =
-  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/58BAwAI/AL+hc2rNAAAAABJRU5ErkJggg==";
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
 
 for (const storedPreview of [false, true]) {
   test(`image thumbnail loads stored file bytes with ${storedPreview ? "a legacy" : "no"} preview`, async ({
