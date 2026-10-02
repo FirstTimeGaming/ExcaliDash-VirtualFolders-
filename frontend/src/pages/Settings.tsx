@@ -30,7 +30,7 @@ export const Settings: React.FC = () => {
   const { authEnabled, user, authMode } = useAuth();
   const [editorAutoHide, setEditorAutoHide] = usePreference(
     "editorAutoHide",
-    true,
+    false,
   );
   const [compactSidebar, setCompactSidebar] = usePreference(
     "compactSidebar",

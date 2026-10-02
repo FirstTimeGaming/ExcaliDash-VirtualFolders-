@@ -57,6 +57,7 @@ export const useEditorChrome = ({
 
     return () => {
       window.removeEventListener("mousemove", handleMouseMove);
+      handleMouseMove.cancel();
       if (hideTimeout !== null) clearTimeout(hideTimeout);
     };
   }, [autoHideEnabled, isRenaming]);

@@ -90,12 +90,22 @@ test.describe("Drawing Creation", () => {
     const drawing = await createDrawing(request, { name: drawingName });
     createdDrawingIds.push(drawing.id);
 
+    // A saved override from older releases must not re-enable auto-hide.
+    await page.addInitScript((id) => {
+      localStorage.setItem(`excalidash:editor:${id}:autoHideEnabled`, "1");
+    }, drawing.id);
     await page.goto(`/editor/${drawing.id}`);
     await page.waitForSelector("[class*='excalidraw'], canvas", {
       timeout: 15000,
     });
 
     await expect(page.getByText(drawingName)).toBeVisible();
+    await expect(page.getByTitle("Enable auto-hide")).toBeVisible();
+    // Wait beyond the old three-second initial hide timer without revealing
+    // the header through mouse movement.
+    await page.waitForTimeout(3500);
+    await expect(page.getByText(drawingName)).toBeInViewport();
+    await expect(page.getByTitle("Enable auto-hide")).toBeInViewport();
   });
 
   test("should rename drawing via editor header", async ({ page, request }) => {
