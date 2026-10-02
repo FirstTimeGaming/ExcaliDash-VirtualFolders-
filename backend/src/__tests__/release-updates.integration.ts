@@ -132,6 +132,7 @@ describe("release update HTTP routes", () => {
       const server = await startRuntimeServer({
         AUTH_MODE: "disabled",
         APP_BUILD_LABEL: label,
+        ENFORCE_HTTPS_REDIRECT: "false",
       });
       try {
         const response = await fetch(`${server.url}/system/update`);
