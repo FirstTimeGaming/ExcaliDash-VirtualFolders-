@@ -131,7 +131,6 @@ const ExcalidrawEditor: React.FC = () => {
       me,
       isReady,
       excalidrawAPI,
-      editorContainerRef,
       lastSyncedFilesRef,
       lastSyncedElementOrderSigRef,
       latestElementsRef,
