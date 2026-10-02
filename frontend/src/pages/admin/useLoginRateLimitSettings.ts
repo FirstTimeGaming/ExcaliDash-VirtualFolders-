@@ -17,7 +17,6 @@ const sanitizePositiveInt = (value: number, fallback = 1) => {
 type UseLoginRateLimitSettingsParams = {
   authEnabled: boolean | null;
   isAdmin: boolean;
-  oidcEnabled: boolean;
   setError: (message: string) => void;
   setSuccess: (message: string) => void;
 };
@@ -25,7 +24,6 @@ type UseLoginRateLimitSettingsParams = {
 export const useLoginRateLimitSettings = ({
   authEnabled,
   isAdmin,
-  oidcEnabled,
   setError,
   setSuccess,
 }: UseLoginRateLimitSettingsParams) => {
@@ -159,12 +157,12 @@ export const useLoginRateLimitSettings = ({
   }, [resetIdentifier, setError, setSuccess]);
 
   useEffect(() => {
-    if (!authEnabled || !isAdmin || !oidcEnabled) return;
+    if (!authEnabled || !isAdmin) return;
     void loadConfig();
-  }, [authEnabled, isAdmin, oidcEnabled, loadConfig]);
+  }, [authEnabled, isAdmin, loadConfig]);
 
   useEffect(() => {
-    if (!authEnabled || !isAdmin || !oidcEnabled) return;
+    if (!authEnabled || !isAdmin) return;
     if (!savedConfig || !dirty || saving) return;
     if (lastAutoSaveAttemptKeyRef.current === normalizedConfigKey) return;
     setAutoSaveQueued(true);
@@ -181,7 +179,6 @@ export const useLoginRateLimitSettings = ({
   }, [
     authEnabled,
     isAdmin,
-    oidcEnabled,
     savedConfig,
     dirty,
     saving,

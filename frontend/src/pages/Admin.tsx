@@ -56,7 +56,6 @@ export const Admin: React.FC = () => {
   const loginRateLimit = useLoginRateLimitSettings({
     authEnabled,
     isAdmin,
-    oidcEnabled: accessControl.oidcEnabled,
     setError,
     setSuccess,
   });
@@ -238,7 +237,7 @@ export const Admin: React.FC = () => {
             }
           />
         ) : null}{" "}
-        {authEnabled && accessControl.oidcEnabled ? (
+        {authEnabled && isAdmin ? (
           <LoginRateLimitCard
             loading={loginRateLimit.loading}
             saving={loginRateLimit.saving}
