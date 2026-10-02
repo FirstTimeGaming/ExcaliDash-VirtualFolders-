@@ -3,6 +3,7 @@ import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import { Excalidraw } from "@excalidraw/excalidraw";
 import type { DrawingSnapshotFull } from "../../api";
 import { getHistoryPreviewAppState } from "./historyPreview";
+import { validateEmbeddableUrl } from "./shared";
 
 export const HistoryPreviewCanvas = ({
   snapshot,
@@ -34,6 +35,7 @@ export const HistoryPreviewCanvas = ({
       langCode={langCode}
       viewModeEnabled
       zenModeEnabled
+      validateEmbeddable={validateEmbeddableUrl}
     />
   </div>
 );

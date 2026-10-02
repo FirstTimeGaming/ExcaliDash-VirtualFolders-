@@ -12,6 +12,7 @@ import * as api from "../src/api";
 import { exportToSvg } from "@excalidraw/excalidraw";
 import { saveDrawingKeepalive } from "../src/pages/editor/keepaliveSave";
 import type { DrawingSnapshotFull } from "../src/api";
+import { validateEmbeddableUrl } from "../src/pages/editor/shared";
 
 const { portalTargets } = vi.hoisted(() => ({
   portalTargets: [] as unknown[],
@@ -279,6 +280,11 @@ describe("isolated history preview", () => {
       historicalSnapshot.elements,
     );
     expect(preview.props.initialData.files).toEqual(historicalSnapshot.files);
+    expect(preview.props.validateEmbeddable).toBe(validateEmbeddableUrl);
+    expect(
+      preview.props.validateEmbeddable("https://example.com/embedded"),
+    ).toBe(true);
+    expect(preview.props.validateEmbeddable("javascript:alert(1)")).toBe(false);
     expect(preview.props.initialData.appState).not.toHaveProperty(
       "collaborators",
     );
