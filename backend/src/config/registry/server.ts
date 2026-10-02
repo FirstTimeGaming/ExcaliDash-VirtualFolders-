@@ -2,6 +2,12 @@ import type { EnvVarSpec } from "./types";
 
 export const serverEnv: readonly EnvVarSpec[] = [
   {
+    name: "APP_BUILD_LABEL",
+    group: "Server",
+    kind: "string",
+    doc: "CI-derived backend build identity. Official images set this automatically; VERSION remains the source for the base version.",
+  },
+  {
     name: "PORT",
     group: "Server",
     kind: "number",

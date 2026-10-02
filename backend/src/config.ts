@@ -59,6 +59,7 @@ interface Config {
   port: number;
   listenHost: string;
   nodeEnv: string;
+  buildLabel: string | null;
   isDev: boolean;
   isProduction: boolean;
   databaseUrl?: string;
@@ -362,6 +363,7 @@ export const config: Config = {
   port: readNumber("PORT", 8000),
   listenHost: readString("BACKEND_HOST", "0.0.0.0"),
   nodeEnv: resolvedNodeEnv,
+  buildLabel: readOptionalString("APP_BUILD_LABEL"),
   isDev: resolvedNodeEnv === "development",
   isProduction: resolvedNodeEnv === "production",
   databaseUrl: process.env.DATABASE_URL,

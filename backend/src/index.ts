@@ -135,7 +135,14 @@ const getBackendVersion = (): string => {
     try {
       const version = fs.readFileSync(versionPath, "utf8").trim();
       if (version) {
-        cachedBackendVersion = version;
+        const label = config.buildLabel;
+        cachedBackendVersion =
+          label &&
+          (label === version ||
+            (label.startsWith(`${version}-dev.`) &&
+              /^\d+\.\d+\.\d+-dev\.[0-9a-f]{7,40}$/.test(label)))
+            ? label
+            : version;
         return cachedBackendVersion;
       }
     } catch {

@@ -42,6 +42,20 @@ const envOutboundEnabled = (): boolean => config.updateCheck.outbound;
 
 const envGithubToken = (): string | null => config.updateCheck.githubToken;
 
+const sameDevVersion = (
+  a: NonNullable<ReturnType<typeof parseSemver>>,
+  b: NonNullable<ReturnType<typeof parseSemver>>,
+): boolean =>
+  a.major === b.major &&
+  a.minor === b.minor &&
+  a.patch === b.patch &&
+  [a, b].every(
+    (version) =>
+      version.prerelease.length === 2 &&
+      version.prerelease[0] === "dev" &&
+      /^[0-9a-f]{7,40}$/.test(version.prerelease[1]),
+  );
+
 const pickLatestRelease = (
   releases: GithubRelease[],
   channel: UpdateChannel,
@@ -69,7 +83,12 @@ const pickLatestRelease = (
 
   let best = candidates[0];
   for (const candidate of candidates.slice(1)) {
-    if (compareSemver(candidate.parsed, best.parsed) > 0) {
+    // Commit hashes identify builds, not their chronological order.
+    const order = sameDevVersion(candidate.parsed, best.parsed)
+      ? (Date.parse(candidate.r.published_at ?? "") || 0) -
+        (Date.parse(best.r.published_at ?? "") || 0)
+      : compareSemver(candidate.parsed, best.parsed);
+    if (order > 0) {
       best = candidate;
     }
   }
@@ -123,8 +142,12 @@ export const fetchLatest = async (
   }
 
   const url =
-    "https://api.github.com/repos/ZimengXiong/ExcaliDash/releases?per_page=30";
-  const resp = await fetch(url, { headers });
+    "https://api.github.com/repos/ZimengXiong/ExcaliDash/releases" +
+    (channel === "stable" ? "/latest" : "?per_page=100");
+  const resp = await fetch(url, {
+    headers,
+    signal: AbortSignal.timeout(10_000),
+  });
 
   if (resp.status === 304 && cache && cache.channel === channel) {
     cache = { ...cache, fetchedAt: now };
@@ -147,7 +170,11 @@ export const fetchLatest = async (
 
   const etag = resp.headers.get("etag");
   const json = (await resp.json()) as unknown;
-  const releases = Array.isArray(json) ? (json as GithubRelease[]) : [];
+  const releases = Array.isArray(json)
+    ? (json as GithubRelease[])
+    : channel === "stable" && json && typeof json === "object"
+      ? [json as GithubRelease]
+      : [];
   const latest = pickLatestRelease(releases, channel);
 
   const latestVersion = latest?.tag_name
@@ -175,6 +202,11 @@ export const computeIsUpdateAvailable = (
   const currentParsed = parseSemver(currentVersion);
   const latestParsed = parseSemver(latestVersion);
   if (!currentParsed || !latestParsed) return null;
+  // The selected release is the newest published dev build. A different hash
+  // means a channel update; its lexical SemVer precedence is meaningless.
+  if (sameDevVersion(currentParsed, latestParsed)) {
+    return currentParsed.prerelease[1] !== latestParsed.prerelease[1];
+  }
   return compareSemver(latestParsed, currentParsed) > 0;
 };
 

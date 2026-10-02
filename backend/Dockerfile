@@ -52,6 +52,9 @@ RUN npm prune --omit=dev && npm cache clean --force
 # Production stage
 FROM node:20-alpine
 
+ARG APP_BUILD_LABEL
+ENV APP_BUILD_LABEL=${APP_BUILD_LABEL}
+
 # Install runtime packages and create non-root user
 RUN apk add --no-cache openssl su-exec && \
     addgroup -g 1001 -S nodejs && \

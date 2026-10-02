@@ -215,6 +215,7 @@ jobs:
       cache: true
       cache-mode: max
       cache-scope: backend-image
+      build-args: APP_BUILD_LABEL=${{ needs.release-metadata.outputs.build-label }}
       sbom: ${{ needs.release-metadata.outputs.publish == 'true' }}
       meta-images: zimengxiong/excalidash-backend
       meta-tags: ${{ needs.release-metadata.outputs.tags }}
