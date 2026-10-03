@@ -202,16 +202,14 @@ function event(socket, name, predicate = () => true) {
 }
 async function join(socket, drawingId, client) {
   const ack = await new Promise((resolve, reject) =>
-    socket
-      .timeout(timeout)
-      .emit(
-        "join-room",
-        {
-          drawingId,
-          user: { id: "spoofed-id", name: "spoofed-name", color: "#123456" },
-        },
-        (error, value) => (error ? reject(error) : resolve(value)),
-      ),
+    socket.timeout(timeout).emit(
+      "join-room",
+      {
+        drawingId,
+        user: { id: "spoofed-id", name: "spoofed-name", color: "#123456" },
+      },
+      (error, value) => (error ? reject(error) : resolve(value)),
+    ),
   );
   assert.equal(ack.user.id, client.user.id);
   assert.equal(ack.user.name, client.user.name);
@@ -538,6 +536,60 @@ try {
           digest(raceBytes) === digest(png) ? alternate : png,
         );
         await bytesFor(owner, assets.id, "raced", raceBytes);
+        const diff = await owner.request(`/drawings/${assets.id}/files/diff`);
+        assert.equal(
+          diff.summary.totalS3Files,
+          3,
+          "losing concurrent upload must not leave a second S3 generation",
+        );
+      },
+    );
+    await scenario(
+      "simultaneous image saves preserve committed files through conflict cleanup and rebase",
+      async () => {
+        const initial = assets;
+        const ids = ["owner-image-race", "peer-image-race"];
+        const outcomes = await Promise.all(
+          [owner, peer].map((client, index) =>
+            client.request(`/drawings/${assets.id}`, {
+              method: "PUT",
+              status: [200, 409],
+              body: {
+                version: initial.version,
+                elements: [...initial.elements, image(ids[index], ids[index])],
+                appState: initial.appState,
+                files: { [ids[index]]: inline(ids[index]) },
+              },
+            }),
+          ),
+        );
+        const winner = outcomes.find((value) => value.id);
+        assert(winner);
+        assert.equal(outcomes.filter((value) => value.id).length, 1);
+        assert.equal(
+          outcomes.filter((value) => value.code === "VERSION_CONFLICT").length,
+          1,
+        );
+        const winningId = ids.find((id) => winner.files[id]);
+        const missingId = ids.find((id) => !winner.files[id]);
+        await bytesFor(owner, assets.id, winningId);
+        assets = await save(
+          owner,
+          winner,
+          [...winner.elements, image(missingId, missingId)],
+          { [missingId]: inline(missingId) },
+        );
+        assert.equal(Object.keys(assets.files).length, 4);
+        for (const id of Object.keys(assets.files))
+          await bytesFor(owner, assets.id, id);
+        assets = await save(owner, assets, assets.elements, {
+          "raw-first": { ...assets.files["raw-first"], dataURL: "" },
+        });
+        assert.equal(
+          assets.files["raw-first"].dataURL,
+          managed(assets.id, "raw-first").dataURL,
+        );
+        await bytesFor(owner, assets.id, "raw-first");
       },
     );
     await scenario(
