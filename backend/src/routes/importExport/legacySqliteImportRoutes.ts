@@ -9,6 +9,8 @@ import {
   normalizeNonEmptyId,
   openReadonlySqliteDb,
   parseOptionalJson,
+  assertImportedScene,
+  replaceImportedDrawing,
   resolveSafeUploadedFilePath,
   sanitizeDrawingData,
 } from "./shared";
@@ -258,7 +260,10 @@ export const registerLegacySqliteImportRoutes = (
           for (const d of importedDrawings) {
             const importPayload = {
               name: typeof d.name === "string" ? d.name : "Untitled Drawing",
-              elements: parseOptionalJson<unknown[]>(d.elements, []),
+              elements: parseOptionalJson<unknown[] | undefined>(
+                d.elements,
+                undefined,
+              ),
               appState: parseOptionalJson<Record<string, unknown>>(
                 d.appState,
                 {},
@@ -267,6 +272,7 @@ export const registerLegacySqliteImportRoutes = (
               preview: typeof d.preview === "string" ? d.preview : null,
               collectionId: null as string | null,
             };
+            assertImportedScene(importPayload);
             if (!validateImportedDrawing(importPayload)) {
               return res.status(400).json({
                 error: "Invalid imported drawing",
@@ -444,19 +450,13 @@ export const registerLegacySqliteImportRoutes = (
                 continue;
               }
               if (existing.userId === req.user!.id) {
-                await tx.drawing.update({
-                  where: { id: existing.id },
-                  data: {
-                    name: d.name,
-                    elements: JSON.stringify(d.sanitized.elements),
-                    appState: JSON.stringify(d.sanitized.appState),
-                    files: JSON.stringify(processedFiles),
-                    preview: d.sanitized.preview ?? null,
-                    version: Number.isFinite(Number(d.versionRaw))
-                      ? Number(d.versionRaw)
-                      : existing.version,
-                    collectionId: resolvedCollectionId ?? null,
-                  },
+                await replaceImportedDrawing(tx, existing, {
+                  name: d.name,
+                  elements: JSON.stringify(d.sanitized.elements),
+                  appState: JSON.stringify(d.sanitized.appState),
+                  files: JSON.stringify(processedFiles),
+                  preview: d.sanitized.preview ?? null,
+                  collectionId: resolvedCollectionId ?? null,
                 });
                 drawingsUpdated += 1;
                 continue;
@@ -502,7 +502,13 @@ export const registerLegacySqliteImportRoutes = (
           });
           invalidateDrawingsCache();
           return res.json({ success: true, ...result });
-        } catch {
+        } catch (error) {
+          if (error instanceof ImportValidationError) {
+            return res.status(error.status).json({
+              error: "Invalid imported drawing",
+              message: error.message,
+            });
+          }
           return res.status(500).json({
             error: "Legacy DB support unavailable",
             message:

@@ -22,6 +22,8 @@ import {
 import { getTestPrisma, setupTestDb, cleanupTestDb } from "./testUtils";
 import { BOOTSTRAP_USER_ID } from "../auth/authMode";
 import { downloadBuffer } from "../s3";
+import { decodeSnapshotField } from "../snapshots/snapshotCodec";
+import { replaceImportedDrawing } from "../routes/importExport/shared";
 
 vi.mock("../s3", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../s3")>()),
@@ -234,6 +236,305 @@ describe("Import compatibility (legacy exports)", () => {
 
     expect(res.status).toBe(400);
     expect(String(res.body.message || "")).toContain("Duplicate drawing id");
+  });
+
+  const seedDrawingBeforeInvalidImport = async (id: string) => {
+    await agent.get("/collections").set("User-Agent", userAgent);
+    const drawing = await prisma.drawing.create({
+      data: {
+        id,
+        name: "Keep this drawing",
+        elements: JSON.stringify([
+          {
+            id: "saved-element",
+            type: "rectangle",
+            x: 1,
+            y: 2,
+            width: 3,
+            height: 4,
+          },
+        ]),
+        appState: JSON.stringify({ viewBackgroundColor: "#fedcba" }),
+        files: JSON.stringify({
+          "saved-image": {
+            id: "saved-image",
+            mimeType: "image/png",
+            created: 123,
+            dataURL: `/api/files/${id}/saved-image`,
+          },
+        }),
+        version: 7,
+        userId: BOOTSTRAP_USER_ID,
+      },
+    });
+    await prisma.drawingFile.create({
+      data: {
+        drawingId: id,
+        fileId: "saved-image",
+        mimeType: "image/png",
+        storage: "db",
+        data: Buffer.from("keep saved bytes"),
+        sizeBytes: 16,
+      },
+    });
+    await prisma.drawingSnapshot.create({
+      data: {
+        drawingId: id,
+        version: 6,
+        elements: "[]",
+        appState: "{}",
+        files: "{}",
+      },
+    });
+    return drawing;
+  };
+
+  it.each([
+    ["missing elements", { appState: {}, files: {} }],
+    ["object elements", { elements: {}, appState: {}, files: {} }],
+    ["null elements", { elements: null, appState: {}, files: {} }],
+    ["string appState", { elements: [], appState: "corrupt", files: {} }],
+    ["array files", { elements: [], appState: {}, files: [] }],
+  ])(
+    "rejects backup %s without overwriting any drawings",
+    async (_label, scene) => {
+      const drawing = await seedDrawingBeforeInvalidImport(
+        "invalid-backup-existing",
+      );
+      const history = await prisma.drawingSnapshot.findMany({
+        where: { drawingId: drawing.id },
+      });
+      const zip = new JSZip();
+      zip.file(
+        "excalidash.manifest.json",
+        JSON.stringify({
+          format: "excalidash",
+          formatVersion: 1,
+          exportedAt: new Date().toISOString(),
+          unorganizedFolder: "Unorganized",
+          collections: [
+            {
+              id: "must-not-create",
+              name: "Rejected collection",
+              folder: "Rejected",
+            },
+          ],
+          drawings: [
+            {
+              id: drawing.id,
+              name: "Overwrite",
+              collectionId: null,
+              filePath: "Unorganized/invalid.excalidraw",
+            },
+          ],
+        }),
+      );
+      zip.file("Unorganized/invalid.excalidraw", JSON.stringify(scene));
+      const archive = await zip.generateAsync({ type: "nodebuffer" });
+      const res = await agent
+        .post("/import/excalidash")
+        .set("User-Agent", userAgent)
+        .set(csrfHeaderName, csrfToken)
+        .attach("archive", archive, "invalid.excalidash");
+
+      expect(res.status).toBe(400);
+      expect(
+        await prisma.drawing.findUnique({ where: { id: drawing.id } }),
+      ).toEqual(drawing);
+      expect(
+        await prisma.collection.findUnique({
+          where: { id: "must-not-create" },
+        }),
+      ).toBeNull();
+      expect(
+        await prisma.drawingSnapshot.findMany({
+          where: { drawingId: drawing.id },
+        }),
+      ).toEqual(history);
+      expect(
+        (await prisma.drawingFile.findUnique({
+          where: {
+            drawingId_fileId: { drawingId: drawing.id, fileId: "saved-image" },
+          },
+        }))!.data,
+      ).toEqual(Buffer.from("keep saved bytes"));
+    },
+  );
+
+  it.each(["elements", "appState", "files"])(
+    "rejects malformed legacy %s JSON before overwriting a same-ID drawing",
+    async (field) => {
+      const drawing = await seedDrawingBeforeInvalidImport("legacy-drawing-1");
+      const history = await prisma.drawingSnapshot.findMany({
+        where: { drawingId: drawing.id },
+      });
+      const legacyDb = createLegacySqliteDb({
+        tableStyle: "prisma",
+        includeCollections: true,
+        includeMigrationsTable: false,
+        includeTrashDrawing: false,
+      });
+      const db = openWritableDb(legacyDb);
+      try {
+        db.prepare(`UPDATE "Drawing" SET "${field}" = ? WHERE id = ?`).run(
+          "{broken",
+          drawing.id,
+        );
+      } finally {
+        db.close();
+      }
+      const res = await agent
+        .post("/import/sqlite/legacy")
+        .set("User-Agent", userAgent)
+        .set(csrfHeaderName, csrfToken)
+        .attach("db", legacyDb);
+
+      expect(res.status).toBe(400);
+      expect(
+        await prisma.drawing.findUnique({ where: { id: drawing.id } }),
+      ).toEqual(drawing);
+      expect(await prisma.drawing.count()).toBe(1);
+      expect(
+        await prisma.drawingSnapshot.findMany({
+          where: { drawingId: drawing.id },
+        }),
+      ).toEqual(history);
+      expect(
+        (await prisma.drawingFile.findUnique({
+          where: {
+            drawingId_fileId: { drawingId: drawing.id, fileId: "saved-image" },
+          },
+        }))!.data,
+      ).toEqual(Buffer.from("keep saved bytes"));
+      expect(
+        await prisma.collection.findUnique({
+          where: { id: "legacy-collection-1" },
+        }),
+      ).toBeNull();
+    },
+  );
+
+  it.each(["excalidash", "legacy"])(
+    "preserves recoverable history and advances live version on same-ID %s import",
+    async (format) => {
+      const id = format === "legacy" ? "legacy-drawing-1" : "import-existing";
+      const drawing = await seedDrawingBeforeInvalidImport(id);
+      let pending = agent
+        .post(
+          format === "legacy" ? "/import/sqlite/legacy" : "/import/excalidash",
+        )
+        .set("User-Agent", userAgent)
+        .set(csrfHeaderName, csrfToken);
+      if (format === "legacy") {
+        const legacyDb = createLegacySqliteDb({
+          tableStyle: "prisma",
+          includeCollections: true,
+          includeMigrationsTable: false,
+          includeTrashDrawing: false,
+        });
+        pending = pending.attach("db", legacyDb);
+      } else {
+        const zip = new JSZip();
+        zip.file(
+          "excalidash.manifest.json",
+          JSON.stringify({
+            format: "excalidash",
+            formatVersion: 1,
+            exportedAt: new Date().toISOString(),
+            unorganizedFolder: "Unorganized",
+            collections: [],
+            drawings: [
+              {
+                id,
+                name: "Restored backup",
+                version: 1,
+                collectionId: null,
+                filePath: "Unorganized/drawing.excalidraw",
+              },
+            ],
+          }),
+        );
+        zip.file(
+          "Unorganized/drawing.excalidraw",
+          JSON.stringify({ elements: [], appState: {}, files: {} }),
+        );
+        pending = pending.attach(
+          "archive",
+          await zip.generateAsync({ type: "nodebuffer" }),
+          "valid.excalidash",
+        );
+      }
+      const imported = await pending;
+      expect(imported.status).toBe(200);
+      const updated = await prisma.drawing.findUnique({ where: { id } });
+      expect(updated!.version).toBe(8);
+      expect(JSON.parse(updated!.elements)).toEqual([]);
+      const snapshots = await prisma.drawingSnapshot.findMany({
+        where: { drawingId: id },
+      });
+      expect(snapshots).toHaveLength(2);
+      const backup = snapshots.find(
+        (snapshot) => snapshot.version === drawing.version,
+      )!;
+      expect(backup).toBeDefined();
+      expect(decodeSnapshotField(backup.elements)).toBe(drawing.elements);
+      expect(decodeSnapshotField(backup.appState)).toBe(drawing.appState);
+      expect(decodeSnapshotField(backup.files)).toBe(drawing.files);
+      const restored = await agent
+        .post(`/drawings/${id}/history/${backup.id}/restore`)
+        .set("User-Agent", userAgent)
+        .set(csrfHeaderName, csrfToken);
+      expect(restored.status).toBe(200);
+      expect(restored.body.version).toBe(9);
+      expect(restored.body.elements).toEqual(JSON.parse(drawing.elements));
+      expect(restored.body.files).toEqual(JSON.parse(drawing.files));
+      expect(
+        (await prisma.drawingFile.findUnique({
+          where: {
+            drawingId_fileId: { drawingId: id, fileId: "saved-image" },
+          },
+        }))!.data,
+      ).toEqual(Buffer.from("keep saved bytes"));
+    },
+  );
+
+  it("rolls back the import scene and safety snapshot if later processing fails", async () => {
+    const drawing = await seedDrawingBeforeInvalidImport(
+      "failed-import-existing",
+    );
+    await expect(
+      prisma.$transaction(async (tx) => {
+        await replaceImportedDrawing(tx, drawing, {
+          elements: "[]",
+          appState: "{}",
+          files: "{}",
+        });
+        throw new Error("later import processing failed");
+      }),
+    ).rejects.toThrow("later import processing failed");
+    expect(
+      await prisma.drawing.findUnique({ where: { id: drawing.id } }),
+    ).toEqual(drawing);
+    expect(await prisma.drawingSnapshot.count()).toBe(1);
+  });
+
+  it("rolls back the safety snapshot when an import loses its version guard", async () => {
+    const drawing = await seedDrawingBeforeInvalidImport(
+      "conflicting-import-existing",
+    );
+    await expect(
+      prisma.$transaction((tx) =>
+        replaceImportedDrawing(
+          tx,
+          { ...drawing, version: drawing.version - 1 },
+          { elements: "[]", files: "{}" },
+        ),
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(
+      await prisma.drawing.findUnique({ where: { id: drawing.id } }),
+    ).toEqual(drawing);
+    expect(await prisma.drawingSnapshot.count()).toBe(1);
   });
 
   const downloadExport = async (): Promise<Buffer> =>

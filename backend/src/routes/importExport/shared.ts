@@ -5,6 +5,7 @@ import JSZip from "jszip";
 import { z } from "zod";
 import { Prisma, PrismaClient } from "../../generated/client";
 import { sanitizeDrawingData } from "../../security";
+import { encodeSnapshotField } from "../../snapshots/snapshotCodec";
 
 export class ImportValidationError extends Error {
   status: number;
@@ -190,13 +191,68 @@ export const parseOptionalJson = <T>(raw: unknown, fallback: T): T => {
     try {
       return JSON.parse(raw) as T;
     } catch {
-      return fallback;
+      throw new ImportValidationError("Legacy drawing contains invalid JSON");
     }
   }
   if (typeof raw === "object" && raw !== null) {
     return raw as T;
   }
   return fallback;
+};
+
+// Validate source fields before defaults or sanitization can disguise a
+// corrupt drawing as an empty scene and overwrite a same-ID live drawing.
+export const assertImportedScene = (scene: {
+  elements: unknown;
+  appState: unknown;
+  files: unknown;
+}) => {
+  const isRecord = (value: unknown) =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+  if (
+    !Array.isArray(scene.elements) ||
+    !isRecord(scene.appState) ||
+    !isRecord(scene.files)
+  ) {
+    throw new ImportValidationError("Drawing contains invalid scene fields");
+  }
+};
+
+export const replaceImportedDrawing = async (
+  tx: Prisma.TransactionClient,
+  existing: {
+    id: string;
+    userId: string;
+    version: number;
+    elements: string;
+    appState: string;
+    files: string;
+  },
+  data: Prisma.DrawingUncheckedUpdateManyInput,
+) => {
+  await tx.drawingSnapshot.create({
+    data: {
+      drawingId: existing.id,
+      version: existing.version,
+      elements: encodeSnapshotField(existing.elements),
+      appState: encodeSnapshotField(existing.appState),
+      files: encodeSnapshotField(existing.files),
+    },
+  });
+  const updated = await tx.drawing.updateMany({
+    where: {
+      id: existing.id,
+      userId: existing.userId,
+      version: existing.version,
+    },
+    data: { ...data, version: { increment: 1 } },
+  });
+  if (updated.count !== 1) {
+    throw new ImportValidationError(
+      "Drawing changed during import; please try again",
+      409,
+    );
+  }
 };
 
 const isPathInsideDirectory = (
