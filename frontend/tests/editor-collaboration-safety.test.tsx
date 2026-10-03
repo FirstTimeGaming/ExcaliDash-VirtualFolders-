@@ -3,8 +3,13 @@ import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../src/api";
 import { rehydrateFilesFromUrls } from "../src/utils/rehydrateFiles";
+import { getFilesDelta } from "../src/pages/editor/shared";
+import { useEditorCanvasHandlers } from "../src/pages/editor/useEditorCanvasHandlers";
 import { useEditorCollaboration } from "../src/pages/editor/useEditorCollaboration";
 const { sockets } = vi.hoisted(() => ({ sockets: [] as any[] }));
+vi.mock("@excalidraw/excalidraw", () => ({
+  CaptureUpdateAction: { IMMEDIATELY: "IMMEDIATELY" },
+}));
 vi.mock("socket.io-client", () => ({
   io: vi.fn(() => {
     const handlers = new Map<string, (...args: any[]) => void>();
@@ -69,6 +74,7 @@ const makeHarness = () => {
   const editor = {
     getSceneElementsIncludingDeleted: () => live,
     getAppState: () => ({ collaborators: new Map() }),
+    getFiles: () => ({}),
     addFiles: vi.fn(),
     updateScene: vi.fn((scene) => {
       if (scene.elements) live = scene.elements;
@@ -100,6 +106,7 @@ const makeHarness = () => {
   };
 };
 beforeEach(() => {
+  vi.useFakeTimers();
   vi.clearAllMocks();
   sockets.length = 0;
   rafs = new Map();
@@ -113,6 +120,8 @@ beforeEach(() => {
     "window",
     Object.assign(new EventTarget(), {
       location: { origin: "http://example.test", reload: vi.fn() },
+      setInterval,
+      clearInterval,
     }),
   );
   vi.stubGlobal("document", new EventTarget());
@@ -127,6 +136,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => renderer?.unmount());
   renderer = undefined;
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 const mount = async (Harness: React.ComponentType) => {
@@ -149,6 +159,156 @@ describe("remote collaboration staging", () => {
     expect(h.input.recordElementVersion).toHaveBeenCalledWith(
       element("peer", 3),
     );
+  });
+  it("compares saved image echoes against retained editor bytes so the file poll does not enqueue another save", async () => {
+    const h = makeHarness();
+    const original = { id: "image", dataURL: "data:image/png;base64,original" };
+    let editorFiles: Record<string, any> = { image: original };
+    h.editor.getFiles = () => editorFiles;
+    h.editor.addFiles.mockImplementation((files: any[]) => {
+      // Match Excalidraw.addMissingFiles: an existing content ID keeps its bytes.
+      const next = { ...editorFiles };
+      files.forEach((file) => {
+        if (!next[file.id]) next[file.id] = file;
+      });
+      editorFiles = next;
+    });
+    h.refs.lastSyncedFilesRef.current = editorFiles;
+    h.refs.latestFilesRef.current = editorFiles;
+    const save = vi.fn();
+    const fileEmit = vi.fn(
+      (files: Record<string, any>) =>
+        Object.keys(getFilesDelta(h.refs.lastSyncedFilesRef.current, files))
+          .length > 0,
+    );
+    function PollingHarness() {
+      const { isSyncing } = useEditorCollaboration({
+        ...h.input,
+        drawingId: "drawing",
+      });
+      useEditorCanvasHandlers({
+        canEdit: true,
+        drawingId: "drawing",
+        isReady: true,
+        debouncedSavePreview: vi.fn(),
+        emitFilesDeltaIfNeeded: fileEmit,
+        refs: {
+          excalidrawAPI: h.input.excalidrawAPI,
+          isSyncing,
+          isUnmounting: ref(false),
+          hasHydratedInitialScene: ref(true),
+          hasSceneChangesSinceLoad: ref(false),
+          initialSceneElements: ref([]),
+          isBootstrappingScene: ref(false),
+          lastLocalChangeAt: ref(0),
+          latestAppState: ref({}),
+          latestElements: h.refs.latestElementsRef,
+          latestFiles: h.refs.latestFilesRef,
+          debouncedSave: ref(save),
+          suspiciousBlankLoad: ref(false),
+        },
+        resolveSafeSnapshot: () => ({
+          prevented: false,
+          staleEmptySnapshot: false,
+          staleNonRenderableSnapshot: false,
+        }),
+        broadcastChanges: vi.fn(),
+      });
+      return null;
+    }
+    await mount(PollingHarness);
+    const incoming = {
+      image: { ...original, dataURL: "data:image/png;base64,compressed" },
+      added: { id: "added", dataURL: "data:image/png;base64,new" },
+    };
+    sockets[0].handlers.get("element-update")({
+      elements: [],
+      files: incoming,
+      persisted: true,
+    });
+    await flushFrames();
+    expect(editorFiles.image).toEqual(original);
+    expect(editorFiles.added).toEqual(incoming.added);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(7500);
+    });
+    expect(fileEmit).toHaveBeenCalledTimes(3);
+    expect(save).not.toHaveBeenCalled();
+    expect(h.refs.latestFilesRef.current).toEqual(incoming);
+    expect(h.refs.lastSyncedFilesRef.current).toEqual(editorFiles);
+  });
+  it("keeps live equal-metadata geometry over a delayed persisted packet while accepting ordinary realtime frames", async () => {
+    const h = makeHarness();
+    await mount(h.Harness);
+    h.setLive([element("live", 1, { x: 100 })]);
+    sockets[0].handlers.get("element-update")({
+      elements: [element("live", 1, { x: 0 })],
+      persisted: true,
+    });
+    await flushFrames();
+    expect(h.refs.latestElementsRef.current).toEqual([
+      element("live", 1, { x: 100 }),
+    ]);
+    sockets[0].handlers.get("element-update")({
+      elements: [element("live", 1, { x: 150 })],
+    });
+    await flushFrames();
+    expect(h.refs.latestElementsRef.current).toEqual([
+      element("live", 1, { x: 150 }),
+    ]);
+  });
+  it("does not acknowledge unrelated unsent local files when applying saved file echoes", async () => {
+    const h = makeHarness();
+    const local = { id: "local", dataURL: "data:image/png;base64,unsent" };
+    const remote = { id: "remote", dataURL: "data:image/png;base64,received" };
+    let editorFiles: Record<string, any> = { local };
+    h.editor.getFiles = () => editorFiles;
+    h.editor.addFiles.mockImplementation((files: any[]) => {
+      files.forEach((file) => {
+        editorFiles = {
+          ...editorFiles,
+          [file.id]: editorFiles[file.id] || file,
+        };
+      });
+    });
+    h.refs.latestFilesRef.current = editorFiles;
+    await mount(h.Harness);
+    sockets[0].handlers.get("element-update")({
+      elements: [],
+      files: { remote },
+      persisted: true,
+    });
+    await flushFrames();
+    expect(h.refs.latestFilesRef.current).toEqual({ local, remote });
+    expect(h.refs.lastSyncedFilesRef.current).toEqual({ remote });
+    expect(
+      getFilesDelta(h.refs.lastSyncedFilesRef.current, editorFiles),
+    ).toEqual({ local });
+  });
+  it("does not erase or acknowledge an unsent local reorder when an older persisted order arrives", async () => {
+    const h = makeHarness();
+    await mount(h.Harness);
+    const first = element("first", 1);
+    const second = element("second", 1);
+    h.input.lastSyncedElementOrderSigRef.current = "first,second";
+    h.setLive([second, first]);
+    sockets[0].handlers.get("element-update")({
+      elements: [first, second],
+      elementOrder: ["first", "second"],
+      persisted: true,
+    });
+    await flushFrames();
+    expect(h.refs.latestElementsRef.current).toEqual([second, first]);
+    expect(h.input.lastSyncedElementOrderSigRef.current).toBe("first,second");
+    expect(
+      h.input.computeElementOrderSig(h.refs.latestElementsRef.current),
+    ).not.toBe(h.input.lastSyncedElementOrderSigRef.current);
+    sockets[0].handlers.get("element-update")({
+      elements: [],
+      elementOrder: ["first", "second"],
+    });
+    await flushFrames();
+    expect(h.refs.latestElementsRef.current).toEqual([first, second]);
   });
   it("ignores an old drawing's delayed image hydration after navigation", async () => {
     const h = makeHarness();

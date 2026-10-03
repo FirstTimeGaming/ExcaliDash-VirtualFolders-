@@ -232,8 +232,18 @@ export const useEditorCollaboration = ({
           excalidrawAPI.current.updateScene(sceneUpdate);
         }
         if (shouldUpdateFiles) {
-          latestFilesRef.current = nextFiles;
-          lastSyncedFilesRef.current = nextFiles;
+          latestFilesRef.current = { ...latestFilesRef.current, ...nextFiles };
+          const editorFiles = excalidrawAPI.current.getFiles?.() || {};
+          const syncedFiles = { ...nextFiles };
+          // Excalidraw retains existing file IDs instead of replacing their
+          // bytes. A saved-scene echo may carry a compressed copy of a local
+          // original: compare future deltas against the bytes actually held
+          // by the editor. Only acknowledge incoming IDs, so unsent local
+          // files still surface through the file poll/broadcast path.
+          for (const id of Object.keys(incomingFiles)) {
+            if (editorFiles[id]) syncedFiles[id] = editorFiles[id];
+          }
+          lastSyncedFilesRef.current = syncedFiles;
         }
       } finally {
         isSyncing.current = false;
@@ -308,14 +318,20 @@ export const useEditorCollaboration = ({
         elements,
         files,
         elementOrder,
+        persisted,
       }: {
         elements: any[];
         files?: Record<string, any>;
         elementOrder?: string[];
+        persisted?: boolean;
       }) => {
-        stageElements(elements);
+        stageElements(elements, persisted === true);
         stageFiles(files);
-        if (Array.isArray(elementOrder) && elementOrder.length > 0) {
+        if (
+          !persisted &&
+          Array.isArray(elementOrder) &&
+          elementOrder.length > 0
+        ) {
           pendingRemoteElementOrderRef.current = elementOrder;
         }
         scheduleRemoteFlush();
