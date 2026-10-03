@@ -27,7 +27,10 @@ import { useKeyboardLayoutFix } from "./editor/useKeyboardLayoutFix";
 import { DEFAULT_GRID_STEP } from "../components/GridStepSelector";
 
 export const Editor: React.FC = () => {
-  return <ExcalidrawEditor />;
+  const { id } = useParams<{ id: string }>();
+  // Keep a departing drawing's queue and refs alive for its unmount flush,
+  // while the next drawing starts with its own scene, version and permissions.
+  return <ExcalidrawEditor key={id} />;
 };
 
 const ExcalidrawEditor: React.FC = () => {
@@ -198,6 +201,7 @@ const ExcalidrawEditor: React.FC = () => {
     historyRestorePendingRef,
     runHistoryRestore,
   } = useEditorPersistence({
+    drawingId: id,
     canEdit,
     refs: persistenceRefs,
     user,

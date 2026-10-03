@@ -85,6 +85,14 @@ export const useEditorFileUploads = ({
 }: UseEditorFileUploadsParams) => {
   const inFlightRef = useRef<Set<string>>(new Set());
   const canEditRef = useRef(canEdit);
+  const drawingSessionRef = useRef({ drawingId });
+  useLayoutEffect(() => {
+    if (drawingSessionRef.current.drawingId !== drawingId) {
+      drawingSessionRef.current = { drawingId };
+      inFlightRef.current = new Set();
+      uploadedRefs.current = {};
+    }
+  }, [drawingId, uploadedRefs]);
   useLayoutEffect(() => {
     canEditRef.current = canEdit;
   }, [canEdit]);
@@ -92,6 +100,12 @@ export const useEditorFileUploads = ({
   const scanNow = useCallback(async () => {
     if (!canEditRef.current || !drawingId || !isFileUploadSupported()) return;
     const editor = excalidrawAPI.current;
+    const session = drawingSessionRef.current;
+    const inFlight = inFlightRef.current;
+    const isCurrent = () =>
+      drawingSessionRef.current === session && session.drawingId === drawingId &&
+      excalidrawAPI.current === editor;
+    if (!isCurrent()) return;
     const files = (editor?.getFiles?.() || latestFiles.current || {}) as Record<
       string,
       any
@@ -104,17 +118,18 @@ export const useEditorFileUploads = ({
         typeof file.dataURL === "string" &&
         file.dataURL.startsWith("data:") &&
         !uploadedRefs.current[id] &&
-        !inFlightRef.current.has(id)
+        !inFlight.has(id)
       );
     });
     if (candidateIds.length === 0) return;
-    candidateIds.forEach((id) => inFlightRef.current.add(id));
+    candidateIds.forEach((id) => inFlight.add(id));
 
     // Compress (idempotent/memoized) and write the result back into the editor
     // so the uploaded bytes are the same ones later saves and previews use.
     let filesToUpload = files;
     try {
       const compressed = await compressExcalidrawFiles(files);
+      if (!isCurrent()) return;
       if (compressed.changed) {
         filesToUpload = compressed.files;
         if (editor && typeof editor.addFiles === "function") {
@@ -125,7 +140,7 @@ export const useEditorFileUploads = ({
             isSyncing.current = false;
           }
         }
-        latestFiles.current = filesToUpload;
+        latestFiles.current = { ...latestFiles.current, ...filesToUpload };
       }
     } catch {
       // Keep original bytes on compression failure; upload proceeds below.
@@ -135,17 +150,17 @@ export const useEditorFileUploads = ({
       const file = filesToUpload[id];
       const dataURL = file?.dataURL;
       if (typeof dataURL !== "string" || !dataURL.startsWith("data:")) {
-        inFlightRef.current.delete(id);
+        inFlight.delete(id);
         return;
       }
       const parsed = dataUrlToBytes(dataURL);
       if (!parsed) {
-        inFlightRef.current.delete(id);
+        inFlight.delete(id);
         return;
       }
       for (let attempt = 0; attempt < UPLOAD_ATTEMPTS; attempt++) {
-        if (!canEditRef.current) {
-          inFlightRef.current.delete(id);
+        if (!canEditRef.current || !isCurrent()) {
+          inFlight.delete(id);
           return;
         }
         try {
@@ -157,13 +172,13 @@ export const useEditorFileUploads = ({
               parsed.mimeType,
           );
           // null => backend lacks the endpoint; stop trying for the session.
-          if (result) uploadedRefs.current[id] = result.url;
-          inFlightRef.current.delete(id);
+          if (result && isCurrent()) uploadedRefs.current[id] = result.url;
+          inFlight.delete(id);
           return;
         } catch {
           if (attempt === UPLOAD_ATTEMPTS - 1) {
             // Give up for now; a later scan retries (server interns meanwhile).
-            inFlightRef.current.delete(id);
+            inFlight.delete(id);
           }
         }
       }

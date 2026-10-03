@@ -66,6 +66,7 @@ type RemoteSceneUpdate =
 type BuildRemoteSceneUpdateInput = {
   collaborators?: Map<string, any>;
   localElements?: readonly any[];
+  localAppState?: any;
   pendingElements?: readonly any[];
   elementOrder?: readonly string[] | null;
   lastSyncedFiles?: Record<string, any>;
@@ -93,6 +94,7 @@ export const getPersistedAppState = (
 export const buildRemoteSceneUpdate = ({
   collaborators,
   localElements = [],
+  localAppState,
   pendingElements = [],
   elementOrder = null,
   lastSyncedFiles = {},
@@ -125,7 +127,7 @@ export const buildRemoteSceneUpdate = ({
   const shouldUpdateElements = pendingElements.length > 0 || hasElementOrder;
 
   if (shouldUpdateElements) {
-    let mergedElements = reconcileElements(localElements, pendingElements);
+    let mergedElements = reconcileElements(localElements, pendingElements, localAppState);
     if (hasElementOrder) {
       mergedElements = applyElementOrder(mergedElements, elementOrder);
     }
