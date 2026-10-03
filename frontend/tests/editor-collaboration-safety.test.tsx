@@ -173,6 +173,25 @@ describe("remote collaboration staging", () => {
     expect(h.refs.latestElementsRef.current).toEqual([realtime]);
     expect(h.input.recordElementVersion).toHaveBeenCalledWith(realtime);
   });
+  it("preserves realtime geometry staged while HTTP catchup resolves before the same frame", async () => {
+    const h = makeHarness();
+    await mount(h.Harness);
+    const response = deferred<any>();
+    vi.mocked(api.getDrawing).mockReturnValueOnce(response.promise);
+    sockets[0].ack({ user: me });
+    const realtime = element("peer-new", 1, { x: 100 });
+    sockets[0].handlers.get("element-update")({ elements: [realtime] });
+    await act(async () => {
+      response.resolve({
+        elements: [element("peer-new", 1, { x: 0 })],
+        files: {},
+      });
+      await response.promise;
+    });
+    await flushFrames();
+    expect(h.refs.latestElementsRef.current).toEqual([realtime]);
+    expect(h.input.recordElementVersion).toHaveBeenCalledWith(realtime);
+  });
   it("accepts realtime geometry staged after an equal-metadata persisted echo in the same frame", async () => {
     const h = makeHarness();
     await mount(h.Harness);
