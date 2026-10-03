@@ -300,6 +300,53 @@ function archiveForm(bytes) {
   return form;
 }
 
+async function verifyPeerFirstUpload(owner, peer) {
+  const drawing = await create(
+    owner,
+    `runtime-peer-upload-${randomUUID().slice(0, 8)}`,
+  );
+  try {
+    await owner.request(`/drawings/${drawing.id}/permissions`, {
+      method: "POST",
+      body: { granteeUserId: peer.user.id, permission: "edit" },
+    });
+    await peer.request(`/drawings/${drawing.id}/files/peer-first`, {
+      method: "PUT",
+      body: png,
+      headers: { "Content-Type": "image/png" },
+    });
+    await bytesFor(owner, drawing.id, "peer-first");
+    const diff = await owner.request(`/drawings/${drawing.id}/files/diff`);
+    const file = diff.files.find((item) => item.fileId === "peer-first");
+    assert(file?.inS3Record, "peer upload must create a tracked file row");
+    console.log(
+      JSON.stringify({
+        peerFirstUpload: {
+          ownerId: owner.user.id,
+          peerId: peer.user.id,
+          drawingId: drawing.id,
+          file,
+        },
+      }),
+    );
+    assert.equal(
+      file.inS3,
+      true,
+      "owner storage UI must find a peer-uploaded image",
+    );
+    if ((await owner.request("/files/config")).s3Enabled)
+      assert(
+        file.s3Key.includes(`${owner.user.id}/${drawing.id}/`),
+        "new peer upload must use drawing owner's S3 namespace",
+      );
+  } finally {
+    await owner.request(`/drawings/${drawing.id}`, {
+      method: "DELETE",
+      body: {},
+    });
+  }
+}
+
 try {
   const owner = await new Client(
     process.env.RUNTIME_OWNER_EMAIL || "runtime.owner@example.test",
@@ -307,7 +354,12 @@ try {
   const peer = await new Client(
     process.env.RUNTIME_PEER_EMAIL || "runtime.peer@example.test",
   ).login();
-  if (process.argv.includes("--check-static")) {
+  if (process.argv.includes("--check-peer-upload")) {
+    await scenario(
+      "peer-first raw upload remains visible in owner storage namespace",
+      () => verifyPeerFirstUpload(owner, peer),
+    );
+  } else if (process.argv.includes("--check-static")) {
     await scenario(
       "nginx serves built HTML, JavaScript, and CSS assets",
       async () => {
@@ -571,6 +623,10 @@ try {
         const recovered = await peer.request(`/drawings/${drawing.id}`);
         assert.deepEqual(recovered.elements, drawing.elements);
       },
+    );
+    await scenario(
+      "peer-first raw upload remains visible in owner storage namespace",
+      () => verifyPeerFirstUpload(owner, peer),
     );
     let assets;
     await scenario(
