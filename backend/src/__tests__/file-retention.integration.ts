@@ -22,6 +22,7 @@ import { applySceneUpdateTx } from "../routes/dashboard/sceneUpdate";
 import { internDrawingFiles } from "../fileProcessing";
 import {
   deleteS3Object,
+  getS3Config,
   isS3Enabled,
   listS3Objects,
   uploadBuffer,
@@ -73,6 +74,7 @@ describe("File reference lifetime", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.mocked(isS3Enabled).mockReturnValue(false);
+    vi.mocked(getS3Config).mockReturnValue(null);
     vi.mocked(listS3Objects).mockResolvedValue([]);
     await cleanupTestDb(prisma);
     await prisma.drawingFile.deleteMany({});
@@ -113,6 +115,135 @@ describe("File reference lifetime", () => {
       invalidateDrawingsCache: vi.fn(),
       io: { to: () => ({ emit: vi.fn() }) } as unknown as Server,
     });
+
+  const mountDrawingUpdates = (
+    internFiles: DrawingRouteContext["internDrawingFiles"],
+  ) =>
+    registerDrawingCreateUpdateRoutes(app, {
+      prisma,
+      requireAuth: auth,
+      optionalAuth: auth,
+      asyncHandler,
+      parseJsonField,
+      drawingUpdateSchema: z.object({
+        elements: z.array(z.any()),
+        files: z.record(z.string(), z.any()),
+        version: z.number().optional(),
+      }),
+      getRequestPrincipal: async () => ({ kind: "user", userId: ownerId }),
+      respondWithAuthErrorIfPresent: () => false,
+      invalidateDrawingsCache: vi.fn(),
+      config: { nodeEnv: "test" },
+      internDrawingFiles: internFiles,
+    } as unknown as DrawingRouteContext);
+
+  it.each(["trim", "orphans"])(
+    "rejects an unversioned save when %s removes its interned image before commit",
+    async (operation) => {
+      const drawing = await createDrawing();
+      mountStorage();
+      mountDrawingUpdates(async (files, userId, drawingId) => {
+        const processed = await internDrawingFiles(
+          files,
+          userId,
+          drawingId,
+          prisma,
+        );
+        const cleaned =
+          operation === "trim"
+            ? await request(app)
+                .post(`/drawings/${drawingId}/trim`)
+                .send({ confirmName: drawing.name })
+            : await request(app)
+                .delete(`/drawings/${drawingId}/files/orphans`)
+                .send({ confirmName: drawing.name, fileIds: ["image"] });
+        expect(cleaned.status).toBe(200);
+        return processed;
+      });
+      const res = await request(app)
+        .put(`/drawings/${drawing.id}`)
+        .send({
+          elements: [],
+          files: {
+            image: {
+              dataURL: "data:image/png;base64,AQID",
+              mimeType: "image/png",
+            },
+          },
+        });
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe("VERSION_CONFLICT");
+      const current = await prisma.drawing.findUniqueOrThrow({
+        where: { id: drawing.id },
+      });
+      expect(current.files).toBe("{}");
+      expect(current.version).toBe(2);
+      expect(
+        await prisma.drawingSnapshot.count({
+          where: { drawingId: drawing.id },
+        }),
+      ).toBe(0);
+    },
+  );
+
+  it("preserves ordinary external image references without requiring stored rows", async () => {
+    const drawing = await createDrawing();
+    mountDrawingUpdates((files, userId, drawingId) =>
+      internDrawingFiles(files, userId, drawingId, prisma),
+    );
+    const external = {
+      dataURL: "https://external.example/image.png",
+      mimeType: "image/png",
+    };
+    const res = await request(app)
+      .put(`/drawings/${drawing.id}`)
+      .send({ elements: [], files: { external } });
+    expect(res.status).toBe(200);
+    expect(res.body.files.external).toEqual(external);
+    expect(
+      await prisma.drawingFile.count({ where: { drawingId: drawing.id } }),
+    ).toBe(0);
+  });
+
+  it("rejects a save when cleanup removes an image interned to a public S3 URL", async () => {
+    vi.mocked(isS3Enabled).mockReturnValue(true);
+    vi.mocked(getS3Config).mockReturnValue({
+      publicUrl: "https://files.example",
+    } as ReturnType<typeof getS3Config>);
+    const drawing = await createDrawing();
+    mountStorage();
+    mountDrawingUpdates(async (files, userId, drawingId) => {
+      const processed = await internDrawingFiles(
+        files,
+        userId,
+        drawingId,
+        prisma,
+      );
+      expect(processed.image.dataURL).toMatch(/^https:\/\/files.example\//);
+      const trimmed = await request(app)
+        .post(`/drawings/${drawingId}/trim`)
+        .send({ confirmName: drawing.name });
+      expect(trimmed.status).toBe(200);
+      return processed;
+    });
+    const res = await request(app)
+      .put(`/drawings/${drawing.id}`)
+      .send({
+        elements: [],
+        files: {
+          image: {
+            dataURL: "data:image/png;base64,AQID",
+            mimeType: "image/png",
+          },
+        },
+      });
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("VERSION_CONFLICT");
+    expect(
+      (await prisma.drawing.findUniqueOrThrow({ where: { id: drawing.id } }))
+        .files,
+    ).toBe("{}");
+  });
 
   it("keeps bytes that enter history before a conflicting save runs compensation", async () => {
     const drawing = await createDrawing();

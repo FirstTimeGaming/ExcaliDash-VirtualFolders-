@@ -274,6 +274,7 @@ export const registerDrawingCreateUpdateRoutes = (
       if (payload.appState !== undefined)
         data.appState = JSON.stringify(payload.appState);
       let processedFilesForUpdate: Record<string, unknown> | undefined;
+      let requiredFileIdsForUpdate: string[] | undefined;
       let knownFileIdsBeforeUpdate: Set<string> | null = null;
       if (payload.files !== undefined) {
         knownFileIdsBeforeUpdate = await listDrawingFileIds(id);
@@ -282,6 +283,22 @@ export const registerDrawingCreateUpdateRoutes = (
           ownerUserId,
           id,
         );
+        requiredFileIdsForUpdate = Object.entries(processedFilesForUpdate)
+          .filter(([fileId, file]) => {
+            const processedUrl = (file as { dataURL?: unknown } | null)
+              ?.dataURL;
+            const originalUrl = (
+              payload.files?.[fileId] as { dataURL?: unknown } | null
+            )?.dataURL;
+            return (
+              processedUrl === `/api/files/${id}/${fileId}` ||
+              (typeof originalUrl === "string" &&
+                originalUrl.startsWith("data:") &&
+                typeof processedUrl === "string" &&
+                processedUrl !== originalUrl)
+            );
+          })
+          .map(([fileId]) => fileId);
         // Note: data.files is not assigned here. The union merge with the
         // authoritative current state happens inside the transaction so a
         // concurrent client's files are never whole-replaced away.
@@ -344,7 +361,11 @@ export const registerDrawingCreateUpdateRoutes = (
             versionGuard:
               payload.version !== undefined ? payload.version : "optimistic",
             maxRetries: payload.version === undefined ? 2 : 0,
-            mutate: () => ({ data, incomingFiles: processedFilesForUpdate }),
+            mutate: () => ({
+              data,
+              incomingFiles: processedFilesForUpdate,
+              requiredFileIds: requiredFileIdsForUpdate,
+            }),
           });
           updatedDrawing = result.drawing;
         } else {
@@ -376,7 +397,7 @@ export const registerDrawingCreateUpdateRoutes = (
             where: { id },
             select: { version: true },
           });
-          if (isSceneUpdate && payload.version !== undefined) {
+          if (isSceneUpdate) {
             return res.status(409).json({
               error: "Conflict",
               code: "VERSION_CONFLICT",
