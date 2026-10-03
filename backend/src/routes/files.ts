@@ -14,7 +14,7 @@ import {
   uploadBuffer,
   buildS3Key,
 } from "../s3";
-import { MIME_TO_EXT } from "../fileProcessing";
+import { MIME_TO_EXT, cleanupUnusedS3Upload } from "../fileProcessing";
 import { randomUUID } from "node:crypto";
 import {
   hasDrawingFileContent,
@@ -167,7 +167,7 @@ export const registerFileRoutes = (
         const ext = MIME_TO_EXT[mimeType] ?? "bin";
         const s3Key = buildS3Key(userId, drawingId, fileId, ext, randomUUID());
         await uploadBuffer(s3Key, body, mimeType);
-        await storeDrawingFileOnce(prisma, {
+        const stored = await storeDrawingFileOnce(prisma, {
           drawingId,
           fileId,
           mimeType,
@@ -176,6 +176,7 @@ export const registerFileRoutes = (
           s3Key,
           data: null,
         });
+        await cleanupUnusedS3Upload(s3Key, stored);
         return res.status(200).json({ url: responseUrl, fileId });
       }
 

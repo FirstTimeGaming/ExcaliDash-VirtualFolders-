@@ -25,6 +25,7 @@ import {
   uploadBuffer,
   getPublicUrl,
   buildS3Key,
+  deleteS3Object,
 } from "./s3";
 
 /**
@@ -61,6 +62,23 @@ export const decodeDataURL = (
     return { buffer, mimeType };
   } catch {
     return null;
+  }
+};
+
+/** Reclaim only this request's fresh generation when another row won. */
+export const cleanupUnusedS3Upload = async (
+  freshKey: string,
+  stored: { storage: string; s3Key: string | null },
+): Promise<void> => {
+  if (stored.storage === "s3" && stored.s3Key === freshKey) return;
+  try {
+    await deleteS3Object(freshKey);
+  } catch (error) {
+    // The winning upload remains valid even if compensation is unavailable.
+    console.warn("[files] Failed to cleanup unused S3 upload", {
+      freshKey,
+      error,
+    });
   }
 };
 
@@ -146,6 +164,7 @@ export const internDrawingFiles = async (
         s3Key,
         data: null,
       });
+      await cleanupUnusedS3Upload(s3Key, stored);
       result[fileId] = {
         ...file,
         mimeType: stored.mimeType,

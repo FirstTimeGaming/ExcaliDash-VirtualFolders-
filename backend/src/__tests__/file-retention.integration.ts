@@ -377,6 +377,9 @@ describe("File reference lifetime", () => {
         if (++uploading === 2) bothUploading();
         await (body[0] === 1 ? winnerReleased : loserReleased);
       });
+      vi.mocked(deleteS3Object).mockImplementation(async (key) => {
+        objects.delete(key);
+      });
       const winner = internDrawingFiles(
         { image: { dataURL: "data:image/png;base64,AQID" } },
         ownerId,
@@ -418,7 +421,81 @@ describe("File reference lifetime", () => {
           : `/api/files/${drawing.id}/image`,
       );
       expect(row.mimeType).toBe("image/png");
-      expect(new Set([...objects.keys()]).size).toBe(2);
+      expect(objects.size).toBe(1);
+      const losingKey = vi
+        .mocked(uploadBuffer)
+        .mock.calls.find(([, body]) => body[0] === 9)?.[0];
+      expect(deleteS3Object).toHaveBeenCalledExactlyOnceWith(losingKey);
+      const image = await request(app).get(`/files/${drawing.id}/image`);
+      expect(image.status).toBe(302);
+      expect(image.headers.location).toBe(
+        `https://downloads.example/${row.s3Key}`,
+      );
+    },
+  );
+
+  it.each(["intern", "raw"])(
+    "keeps a successful %s upload when deleting its losing generation fails",
+    async (mode) => {
+      vi.mocked(isS3Enabled).mockReturnValue(true);
+      const drawing = await createDrawing();
+      const key = `${ownerId}/${drawing.id}/winner/image.png`;
+      const bytes = Buffer.from([1, 2, 3]);
+      const objects = new Map([[key, bytes]]);
+      await prisma.drawingFile.create({
+        data: {
+          drawingId: drawing.id,
+          fileId: "image",
+          storage: "s3",
+          s3Key: key,
+          mimeType: "image/png",
+          sizeBytes: bytes.length,
+        },
+      });
+      const lookup = vi
+        .spyOn(prisma.drawingFile, "findUnique")
+        .mockResolvedValueOnce(null);
+      vi.mocked(uploadBuffer).mockImplementation(async (freshKey, body) => {
+        objects.set(freshKey, Buffer.from(body));
+      });
+      vi.mocked(deleteS3Object).mockRejectedValueOnce(
+        new Error("simulated cleanup failure"),
+      );
+      mountFiles();
+      try {
+        if (mode === "intern") {
+          const processed = await internDrawingFiles(
+            { image: { dataURL: "data:image/png;base64,CQkJ" } },
+            ownerId,
+            drawing.id,
+            prisma,
+          );
+          expect(processed.image.dataURL).toBe(
+            `/api/files/${drawing.id}/image`,
+          );
+        } else {
+          const res = await request(app)
+            .put(`/drawings/${drawing.id}/files/image`)
+            .set("Content-Type", "image/png")
+            .send(Buffer.from([9, 9, 9]));
+          expect(res.status).toBe(200);
+        }
+        const freshKey = vi.mocked(uploadBuffer).mock.calls[0][0];
+        expect(freshKey).not.toBe(key);
+        expect(deleteS3Object).toHaveBeenCalledExactlyOnceWith(freshKey);
+        expect(objects.get(key)?.equals(bytes)).toBe(true);
+        expect(
+          (
+            await prisma.drawingFile.findUniqueOrThrow({
+              where: {
+                drawingId_fileId: { drawingId: drawing.id, fileId: "image" },
+              },
+            })
+          ).s3Key,
+        ).toBe(key);
+      } finally {
+        lookup.mockRestore();
+      }
     },
   );
 
