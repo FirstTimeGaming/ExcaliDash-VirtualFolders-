@@ -8,6 +8,8 @@
  * RUNTIME_IMPORT_URL optionally selects a second disposable instance for
  * cross-deployment backup portability; the same fixture password is used.
  * RUNTIME_EXPORT_ARCHIVE optionally saves the portable backup for inspection.
+ * --check-import imports RUNTIME_IMPORT_ARCHIVE into the import fixture account.
+ * --check-static fetches built HTML/JS/CSS without executing browser code.
  * No browser, database mutation, container operation, or external service use.
  */
 import assert from "node:assert/strict";
@@ -305,7 +307,102 @@ try {
   const peer = await new Client(
     process.env.RUNTIME_PEER_EMAIL || "runtime.peer@example.test",
   ).login();
-  if (process.argv.includes("--check-restart")) {
+  if (process.argv.includes("--check-static")) {
+    await scenario(
+      "nginx serves built HTML, JavaScript, and CSS assets",
+      async () => {
+        const page = await fetch(origin, {
+          signal: AbortSignal.timeout(timeout),
+        });
+        assert.equal(page.status, 200);
+        const html = await page.text();
+        assert(html.includes('id="root"'));
+        const scripts = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map(
+          (match) => match[1],
+        );
+        const styles = [...html.matchAll(/<link[^>]+href="([^"]+\.css)"/g)].map(
+          (match) => match[1],
+        );
+        assert(
+          scripts.length > 0 && styles.length > 0,
+          "built entry JavaScript and CSS must be present",
+        );
+        for (const asset of [...scripts, ...styles]) {
+          const url = new URL(asset, `${origin}/`);
+          assert.equal(
+            url.origin,
+            origin,
+            "entry assets must stay on the selected instance",
+          );
+          const response = await fetch(url, {
+            signal: AbortSignal.timeout(timeout),
+          });
+          assert.equal(response.status, 200, `entry asset ${asset}`);
+          const type = response.headers.get("content-type");
+          assert(
+            asset.endsWith(".css")
+              ? type?.includes("text/css")
+              : /javascript/.test(type || ""),
+            `entry asset MIME type: ${asset}: ${type}`,
+          );
+          assert((await response.arrayBuffer()).byteLength > 0);
+        }
+      },
+    );
+  } else if (process.argv.includes("--check-import")) {
+    await scenario(
+      "portable full-account backup imports across database and image storage configurations",
+      async () => {
+        assert(
+          process.env.RUNTIME_IMPORT_ARCHIVE,
+          "set RUNTIME_IMPORT_ARCHIVE",
+        );
+        const archive = await readFile(process.env.RUNTIME_IMPORT_ARCHIVE);
+        const zip = await JSZip.loadAsync(archive);
+        const manifest = JSON.parse(
+          await zip.file("excalidash.manifest.json").async("string"),
+        );
+        const importer = await new Client(
+          process.env.RUNTIME_IMPORT_EMAIL || "runtime.import@example.test",
+        ).login();
+        const beforeIds = new Set(
+          (await list(importer)).map((item) => item.id),
+        );
+        const imported = await importer.request("/import/excalidash", {
+          method: "POST",
+          body: archiveForm(archive),
+        });
+        assert.equal(
+          imported.drawings.created + imported.drawings.updated,
+          manifest.drawings.length,
+        );
+        const available = await list(importer);
+        for (const metadata of manifest.drawings) {
+          const source = JSON.parse(
+            await zip.file(metadata.filePath).async("string"),
+          );
+          const matches = available.filter(
+            (item) => item.name === metadata.name,
+          );
+          const target =
+            matches.find((item) => item.id === metadata.id) ||
+            matches.find((item) => !beforeIds.has(item.id));
+          assert(target, `missing imported drawing ${metadata.name}`);
+          const actual = await importer.request(`/drawings/${target.id}`);
+          assert.deepEqual(actual.elements, source.elements);
+          for (const [fileId, file] of Object.entries(source.files)) {
+            assert(file.dataURL.startsWith("data:image/png;base64,"));
+            await bytesFor(
+              importer,
+              actual.id,
+              fileId,
+              Buffer.from(file.dataURL.split(",")[1], "base64"),
+            );
+          }
+        }
+      },
+    );
+  } else if (process.argv.includes("--check-restart")) {
     const state = JSON.parse(await readFile(statePath, "utf8"));
     assert.equal(state.origin, origin);
     await scenario(
@@ -813,7 +910,20 @@ try {
       JSON.stringify({ restartState: statePath, scenarios: results.length }),
     );
   }
-  console.log(JSON.stringify({ status: "passed", origin, results }));
+  const report = { status: "passed", origin, results };
+  const stage = process.argv.includes("--check-restart")
+    ? "restart"
+    : process.argv.includes("--check-import")
+      ? "import"
+      : process.argv.includes("--check-static")
+        ? "static"
+        : "baseline";
+  await writeFile(
+    process.env.RUNTIME_REPORT || `${statePath}.${stage}.report.json`,
+    JSON.stringify(report, null, 2),
+    { mode: 0o600 },
+  );
+  console.log(JSON.stringify(report));
 } catch (error) {
   console.error(
     JSON.stringify({
