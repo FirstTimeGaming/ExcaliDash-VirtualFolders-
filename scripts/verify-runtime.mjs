@@ -817,8 +817,15 @@ try {
         );
         const before = await owner.request(`/drawings/${corrupt.id}`);
         const history = await owner.request(`/drawings/${corrupt.id}/history`);
-        assert(history.snapshots.length > 0);
-        for (const snapshot of history.snapshots) {
+        // Own-account imports add valid reversible snapshots on later runs.
+        // The disposable seed reserves versions 1 and 2 for corrupt fixtures.
+        const malformedSnapshots = history.snapshots.filter(
+          (snapshot) =>
+            snapshot.version <=
+            Number(process.env.RUNTIME_CORRUPT_MAX_VERSION || 2),
+        );
+        assert(malformedSnapshots.length > 0);
+        for (const snapshot of malformedSnapshots) {
           await owner.request(
             `/drawings/${corrupt.id}/history/${snapshot.id}/restore`,
             { method: "POST", status: [400, 500], body: {} },
