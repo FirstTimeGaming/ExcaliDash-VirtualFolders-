@@ -32,7 +32,7 @@ COPY --chown=nginx:nginx --chmod=0555 frontend/docker-entrypoint.sh /docker-entr
 # Copy built application from builder
 COPY --from=builder /app/frontend/dist /usr/share/nginx/html
 
-EXPOSE 8080
+EXPOSE 80 8080
 
 # Use custom entrypoint to process nginx config template
 ENTRYPOINT ["/docker-entrypoint.sh"]

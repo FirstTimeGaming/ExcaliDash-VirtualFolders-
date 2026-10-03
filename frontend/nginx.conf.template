@@ -39,6 +39,8 @@ http {
     scgi_temp_path /tmp/scgi_temp;
 
     server {
+        # Keep image-only upgrades compatible with existing port mappings.
+        listen 80;
         listen 8080;
         server_name localhost;
         root /usr/share/nginx/html;

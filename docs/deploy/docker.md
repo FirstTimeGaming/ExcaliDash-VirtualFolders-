@@ -21,7 +21,7 @@ Pin a release for repeatable deployments. Use the same version for both images.
 
 ## Configure HTTPS
 
-Route HTTPS traffic to container port `8080` or host port `6767`. The frontend proxies API and real-time traffic to the backend.
+Route HTTPS traffic to container port `80` or `8080`, or host port `6767`. Both container ports serve the same application. Existing `6767:80` mappings and reverse proxies targeting port `80` remain supported. The frontend proxies API and real-time traffic to the backend.
 
 Create `compose.override.yml` with your public origin and the number of trusted proxy hops:
 
@@ -40,6 +40,19 @@ Apply the override:
 ```bash
 docker compose -f docker-compose.prod.yml -f compose.override.yml up -d
 ```
+
+## Non-root port binding
+
+The frontend runs as the non-root nginx user. Modern Docker permits it to bind port `80` inside its network namespace. On Docker installations that restrict low ports, add this frontend override to allow the listener without running nginx as root:
+
+```yaml
+services:
+  frontend:
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: "0"
+```
+
+This setting applies to the container network namespace, not the host.
 
 ## Persist and back up data
 
