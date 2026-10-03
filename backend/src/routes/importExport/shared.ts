@@ -218,6 +218,45 @@ export const assertImportedScene = (scene: {
   }
 };
 
+export const getRequiredImportedFileIds = (
+  sourceFiles: Record<string, unknown>,
+  processedFiles: Record<string, unknown>,
+  drawingId: string,
+  knownBefore: Set<string>,
+): string[] =>
+  Object.entries(processedFiles)
+    .filter(([fileId, file]) => {
+      const processedUrl = (file as { dataURL?: unknown } | null)?.dataURL;
+      const sourceUrl = (sourceFiles[fileId] as { dataURL?: unknown } | null)
+        ?.dataURL;
+      return (
+        knownBefore.has(fileId) ||
+        processedUrl === `/api/files/${drawingId}/${fileId}` ||
+        (typeof sourceUrl === "string" &&
+          sourceUrl.startsWith("data:") &&
+          typeof processedUrl === "string" &&
+          processedUrl !== sourceUrl)
+      );
+    })
+    .map(([fileId]) => fileId);
+
+export const assertImportedFilesAvailable = async (
+  tx: Prisma.TransactionClient,
+  drawingId: string,
+  requiredFileIds: string[],
+) => {
+  if (requiredFileIds.length === 0) return;
+  const stored = await tx.drawingFile.count({
+    where: { drawingId, fileId: { in: requiredFileIds } },
+  });
+  if (stored !== requiredFileIds.length) {
+    throw new ImportValidationError(
+      "Drawing image bytes changed during import; please try again",
+      409,
+    );
+  }
+};
+
 export const replaceImportedDrawing = async (
   tx: Prisma.TransactionClient,
   existing: {

@@ -11,6 +11,8 @@ import {
   parseOptionalJson,
   assertImportedScene,
   replaceImportedDrawing,
+  getRequiredImportedFileIds,
+  assertImportedFilesAvailable,
   resolveSafeUploadedFilePath,
   sanitizeDrawingData,
 } from "./shared";
@@ -288,6 +290,7 @@ export const registerLegacySqliteImportRoutes = (
               versionRaw: d.version,
             });
           }
+          const knownFileIdsBeforeImport = new Map<number, Set<string>>();
           const finalDrawingIdMap = new Map<number, string>();
           for (let i = 0; i < preparedDrawings.length; i++) {
             const d = preparedDrawings[i];
@@ -306,6 +309,14 @@ export const registerLegacySqliteImportRoutes = (
                   : d.importedId;
             }
             finalDrawingIdMap.set(i, finalId);
+            const knownFiles = await prisma.drawingFile.findMany({
+              where: { drawingId: finalId },
+              select: { fileId: true },
+            });
+            knownFileIdsBeforeImport.set(
+              i,
+              new Set(knownFiles.map((file) => file.fileId)),
+            );
           }
           const S3_UPLOAD_CONCURRENCY = 8;
           const processedFilesMap = new Map<number, Record<string, any>>();
@@ -430,6 +441,16 @@ export const registerLegacySqliteImportRoutes = (
                 : null;
               const finalId =
                 finalDrawingIdMap.get(i) ?? d.importedId ?? uuidv4();
+              await assertImportedFilesAvailable(
+                tx,
+                finalId,
+                getRequiredImportedFileIds(
+                  d.sanitized.files,
+                  processedFiles,
+                  finalId,
+                  knownFileIdsBeforeImport.get(i)!,
+                ),
+              );
               if (!existing) {
                 await tx.drawing.create({
                   data: {

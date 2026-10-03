@@ -24,11 +24,17 @@ import { BOOTSTRAP_USER_ID } from "../auth/authMode";
 import { downloadBuffer } from "../s3";
 import { decodeSnapshotField } from "../snapshots/snapshotCodec";
 import { replaceImportedDrawing } from "../routes/importExport/shared";
+import { internDrawingFiles } from "../fileProcessing";
 
 vi.mock("../s3", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../s3")>()),
   downloadBuffer: vi.fn(),
 }));
+
+vi.mock("../fileProcessing", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../fileProcessing")>();
+  return { ...actual, internDrawingFiles: vi.fn(actual.internDrawingFiles) };
+});
 
 describe("Import compatibility (legacy exports)", () => {
   const uploadsDir = path.resolve(__dirname, "../../uploads");
@@ -536,6 +542,119 @@ describe("Import compatibility (legacy exports)", () => {
     ).toEqual(drawing);
     expect(await prisma.drawingSnapshot.count()).toBe(1);
   });
+
+  it.each(["excalidash", "legacy"])(
+    "rejects %s import if cleanup reclaims newly interned bytes before scene commit",
+    async (format) => {
+      const id =
+        format === "legacy" ? "legacy-drawing-1" : "reclaimed-import-existing";
+      const drawing = await seedDrawingBeforeInvalidImport(id);
+      const files = {
+        pending: {
+          id: "pending",
+          dataURL: "data:image/png;base64,AQID",
+          mimeType: "image/png",
+          created: 1,
+        },
+      };
+      let stateAfterCleanup: typeof drawing | null = null;
+      vi.mocked(internDrawingFiles).mockImplementationOnce(async (...args) => {
+        const actual =
+          await vi.importActual<typeof import("../fileProcessing")>(
+            "../fileProcessing",
+          );
+        const processed = await actual.internDrawingFiles(...args);
+        const trimmed = await agent
+          .post(`/drawings/${id}/trim`)
+          .set("User-Agent", userAgent)
+          .set(csrfHeaderName, csrfToken)
+          .send({ confirmName: drawing.name });
+        expect(trimmed.status).toBe(200);
+        expect(
+          await prisma.drawingFile.findUnique({
+            where: { drawingId_fileId: { drawingId: id, fileId: "pending" } },
+          }),
+        ).toBeNull();
+        stateAfterCleanup = await prisma.drawing.findUnique({ where: { id } });
+        return processed;
+      });
+      let pending = agent
+        .post(
+          format === "legacy" ? "/import/sqlite/legacy" : "/import/excalidash",
+        )
+        .set("User-Agent", userAgent)
+        .set(csrfHeaderName, csrfToken);
+      if (format === "legacy") {
+        const legacyDb = createLegacySqliteDb({
+          tableStyle: "prisma",
+          includeCollections: true,
+          includeMigrationsTable: false,
+          includeTrashDrawing: false,
+        });
+        const db = openWritableDb(legacyDb);
+        try {
+          db.prepare('UPDATE "Drawing" SET files = ? WHERE id = ?').run(
+            JSON.stringify(files),
+            id,
+          );
+        } finally {
+          db.close();
+        }
+        pending = pending.attach("db", legacyDb);
+      } else {
+        const zip = new JSZip();
+        zip.file(
+          "excalidash.manifest.json",
+          JSON.stringify({
+            format: "excalidash",
+            formatVersion: 1,
+            exportedAt: new Date().toISOString(),
+            unorganizedFolder: "Unorganized",
+            collections: [],
+            drawings: [
+              {
+                id,
+                name: "Imported scene",
+                version: 1,
+                collectionId: null,
+                filePath: "Unorganized/drawing.excalidraw",
+              },
+            ],
+          }),
+        );
+        zip.file(
+          "Unorganized/drawing.excalidraw",
+          JSON.stringify({ elements: [], appState: {}, files }),
+        );
+        pending = pending.attach(
+          "archive",
+          await zip.generateAsync({ type: "nodebuffer" }),
+          "reclaimed.excalidash",
+        );
+      }
+      const result = await pending;
+      expect(result.status).toBe(409);
+      expect(stateAfterCleanup).not.toBeNull();
+      expect(await prisma.drawing.findUnique({ where: { id } })).toEqual(
+        stateAfterCleanup,
+      );
+      expect(
+        await prisma.drawingSnapshot.count({ where: { drawingId: id } }),
+      ).toBe(1);
+      if (format === "legacy") {
+        expect(
+          await prisma.collection.findUnique({
+            where: { id: "legacy-collection-1" },
+          }),
+        ).toBeNull();
+        expect(
+          await prisma.drawing.findUnique({
+            where: { id: "legacy-drawing-2" },
+          }),
+        ).toBeNull();
+      }
+    },
+  );
 
   const downloadExport = async (): Promise<Buffer> =>
     new Promise((resolve, reject) => {

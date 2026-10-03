@@ -8,6 +8,8 @@ import {
   assertSafeZipArchive,
   assertImportedScene,
   replaceImportedDrawing,
+  getRequiredImportedFileIds,
+  assertImportedFilesAvailable,
   excalidashManifestSchemaV1,
   findFirstDuplicate,
   getSafeZipEntry,
@@ -366,6 +368,7 @@ export const registerExcalidashImportRoutes = (
           }
           throw error;
         }
+        const knownFileIdsBeforeImport = new Map<number, Set<string>>();
         const finalDrawingIdMap = new Map<number, string>();
         for (let i = 0; i < preparedDrawings.length; i++) {
           const prepared = preparedDrawings[i];
@@ -378,6 +381,14 @@ export const registerExcalidashImportRoutes = (
               ? uuidv4()
               : prepared.id;
           finalDrawingIdMap.set(i, finalId);
+          const knownFiles = await prisma.drawingFile.findMany({
+            where: { drawingId: finalId },
+            select: { fileId: true },
+          });
+          knownFileIdsBeforeImport.set(
+            i,
+            new Set(knownFiles.map((file) => file.fileId)),
+          );
         }
         const S3_UPLOAD_CONCURRENCY = 8;
         const processedFilesMap = new Map<number, Record<string, any>>();
@@ -476,6 +487,16 @@ export const registerExcalidashImportRoutes = (
                 where: { id: prepared.id },
               });
               const finalId = finalDrawingIdMap.get(i) ?? prepared.id;
+              await assertImportedFilesAvailable(
+                tx,
+                finalId,
+                getRequiredImportedFileIds(
+                  prepared.sanitized!.files,
+                  processedFiles,
+                  finalId,
+                  knownFileIdsBeforeImport.get(i)!,
+                ),
+              );
               const elementsJson = JSON.stringify(prepared.sanitized!.elements);
               const appStateJson = JSON.stringify(prepared.sanitized!.appState);
               const filesJson = JSON.stringify(processedFiles);

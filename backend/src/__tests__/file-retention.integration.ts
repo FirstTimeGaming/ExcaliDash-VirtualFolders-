@@ -245,6 +245,55 @@ describe("File reference lifetime", () => {
     ).toBe("{}");
   });
 
+  it("rejects an existing public S3 reference reclaimed before a versionless save", async () => {
+    vi.mocked(isS3Enabled).mockReturnValue(true);
+    vi.mocked(getS3Config).mockReturnValue({
+      publicUrl: "https://files.example",
+    } as ReturnType<typeof getS3Config>);
+    const drawing = await createDrawing();
+    const image = {
+      dataURL: "https://files.example/owner/drawing/image.png",
+      mimeType: "image/png",
+    };
+    await prisma.drawingFile.create({
+      data: {
+        drawingId: drawing.id,
+        fileId: "image",
+        mimeType: "image/png",
+        storage: "s3",
+        s3Key: "owner/drawing/image.png",
+      },
+    });
+    mountStorage();
+    mountDrawingUpdates(async (files, userId, drawingId) => {
+      const processed = await internDrawingFiles(
+        files,
+        userId,
+        drawingId,
+        prisma,
+      );
+      const trimmed = await request(app)
+        .post(`/drawings/${drawingId}/trim`)
+        .send({ confirmName: drawing.name });
+      expect(trimmed.status).toBe(200);
+      expect(await prisma.drawingFile.count({ where: { drawingId } })).toBe(0);
+      return processed;
+    });
+    const saved = await request(app)
+      .put(`/drawings/${drawing.id}`)
+      .send({ elements: [], files: { image } });
+    expect(saved.status).toBe(409);
+    expect(saved.body.code).toBe("VERSION_CONFLICT");
+    const current = await prisma.drawing.findUniqueOrThrow({
+      where: { id: drawing.id },
+    });
+    expect(current.files).toBe("{}");
+    expect(current.version).toBe(2);
+    expect(
+      await prisma.drawingSnapshot.count({ where: { drawingId: drawing.id } }),
+    ).toBe(0);
+  });
+
   it("keeps bytes that enter history before a conflicting save runs compensation", async () => {
     const drawing = await createDrawing();
     registerDrawingCreateUpdateRoutes(app, {

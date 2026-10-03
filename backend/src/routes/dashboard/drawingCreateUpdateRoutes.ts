@@ -291,6 +291,7 @@ export const registerDrawingCreateUpdateRoutes = (
               payload.files?.[fileId] as { dataURL?: unknown } | null
             )?.dataURL;
             return (
+              knownFileIdsBeforeUpdate!.has(fileId) ||
               processedUrl === `/api/files/${id}/${fileId}` ||
               (typeof originalUrl === "string" &&
                 originalUrl.startsWith("data:") &&
