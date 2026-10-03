@@ -259,13 +259,22 @@ export const useEditorCollaboration = ({
       if (cancelled || !Array.isArray(elements)) return;
       const editor = excalidrawAPI.current;
       const liveById = fromSnapshot
-        ? new Map((editor?.getSceneElementsIncludingDeleted?.() ?? latestElementsRef.current).map((el: any) => [el.id, el]))
+        ? new Map(
+            (
+              editor?.getSceneElementsIncludingDeleted?.() ??
+              latestElementsRef.current
+            ).map((el: any) => [el.id, el]),
+          )
         : null;
       for (const el of elements) {
         const id = el?.id;
         if (typeof id !== "string" || id.length === 0) continue;
         const live = liveById?.get(id);
-        if (live && reconcileElements([live], [el], editor?.getAppState?.(), true)[0] !== el) {
+        if (
+          live &&
+          reconcileElements([live], [el], editor?.getAppState?.(), true)[0] !==
+            el
+        ) {
           continue;
         }
         const previous = pendingRemoteElementsRef.current.get(id);
@@ -295,7 +304,11 @@ export const useEditorCollaboration = ({
     };
     socket.on(
       "element-update",
-      ({ elements, files, elementOrder }: {
+      ({
+        elements,
+        files,
+        elementOrder,
+      }: {
         elements: any[];
         files?: Record<string, any>;
         elementOrder?: string[];
@@ -320,19 +333,24 @@ export const useEditorCollaboration = ({
         // Socket packets received during the read already have newer file
         // receipts. A delayed HTTP snapshot must not replace their bytes.
         const remoteFiles = Object.fromEntries(
-          Object.entries(remote.files || {}).filter(([id]) =>
-            fileReceipts.get(id) === receiptsBeforeRead.get(id),
+          Object.entries(remote.files || {}).filter(
+            ([id]) => fileReceipts.get(id) === receiptsBeforeRead.get(id),
           ),
         );
         stageFiles(remoteFiles);
         scheduleRemoteFlush();
       } catch (error) {
         if (!cancelled && generation === catchupGeneration) {
-          console.warn("[Editor] Failed to catch up collaboration scene", error);
+          console.warn(
+            "[Editor] Failed to catch up collaboration scene",
+            error,
+          );
         }
       }
     };
-    const invalidateCatchup = () => { catchupGeneration += 1; };
+    const invalidateCatchup = () => {
+      catchupGeneration += 1;
+    };
     socket.on("disconnect", invalidateCatchup);
     const detachRoomJoin = bindRoomJoin(socket, drawingId, me, (payload) => {
       if (cancelled) return;

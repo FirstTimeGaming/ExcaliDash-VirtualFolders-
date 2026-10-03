@@ -127,7 +127,11 @@ export const buildRemoteSceneUpdate = ({
   const shouldUpdateElements = pendingElements.length > 0 || hasElementOrder;
 
   if (shouldUpdateElements) {
-    let mergedElements = reconcileElements(localElements, pendingElements, localAppState);
+    let mergedElements = reconcileElements(
+      localElements,
+      pendingElements,
+      localAppState,
+    );
     if (hasElementOrder) {
       mergedElements = applyElementOrder(mergedElements, elementOrder);
     }

@@ -103,7 +103,8 @@ export const useEditorFileUploads = ({
     const session = drawingSessionRef.current;
     const inFlight = inFlightRef.current;
     const isCurrent = () =>
-      drawingSessionRef.current === session && session.drawingId === drawingId &&
+      drawingSessionRef.current === session &&
+      session.drawingId === drawingId &&
       excalidrawAPI.current === editor;
     if (!isCurrent()) return;
     const files = (editor?.getFiles?.() || latestFiles.current || {}) as Record<

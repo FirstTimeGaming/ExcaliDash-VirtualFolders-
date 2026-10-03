@@ -1,7 +1,10 @@
 import type { MutableRefObject } from "react";
 import * as api from "../../api";
 import { reconcileElements } from "../../utils/sync";
-import { filesNeedRehydration, rehydrateFilesFromUrls } from "../../utils/rehydrateFiles";
+import {
+  filesNeedRehydration,
+  rehydrateFilesFromUrls,
+} from "../../utils/rehydrateFiles";
 
 type ReconcileRefs = {
   currentDrawingVersion: MutableRefObject<number | null>;
@@ -29,7 +32,8 @@ export const reloadAndReconcile = async (
   if (!isCurrent()) return null;
   const remote = await api.getDrawing(drawingId);
   if (!isCurrent()) return null;
-  const storedRemoteFiles = (remote.files as Record<string, any> | undefined) || {};
+  const storedRemoteFiles =
+    (remote.files as Record<string, any> | undefined) || {};
   const remoteFiles = filesNeedRehydration(storedRemoteFiles)
     ? await rehydrateFilesFromUrls(storedRemoteFiles)
     : storedRemoteFiles;
@@ -63,7 +67,10 @@ export const reloadAndReconcile = async (
         editor.addFiles(Object.values(mergedFiles));
       }
       if (typeof editor.updateScene === "function") {
-        editor.updateScene({ elements: mergedElements, captureUpdate: "NEVER" });
+        editor.updateScene({
+          elements: mergedElements,
+          captureUpdate: "NEVER",
+        });
       }
     } finally {
       refs.isSyncing.current = false;

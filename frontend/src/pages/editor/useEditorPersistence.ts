@@ -129,7 +129,9 @@ export const useEditorPersistence = ({
       refs.excalidrawAPI.current === editor;
     if (!canEditRef.current || !drawingId || !isCurrent()) return;
     try {
-      const persistableAppState = getPersistedAppState(editor?.getAppState?.() ?? refs.latestAppState.current ?? appState);
+      const persistableAppState = getPersistedAppState(
+        editor?.getAppState?.() ?? refs.latestAppState.current ?? appState,
+      );
       // Queued arguments may predate a previous conflict merge. Sample the live
       // scene when the queued save starts, including its deletion tombstones.
       const liveElements = editor?.getSceneElementsIncludingDeleted?.();
@@ -190,7 +192,10 @@ export const useEditorPersistence = ({
             refs.isSyncing.current = false;
           }
         }
-        refs.latestFiles.current = { ...refs.latestFiles.current, ...persistableFiles };
+        refs.latestFiles.current = {
+          ...refs.latestFiles.current,
+          ...persistableFiles,
+        };
         // Excalidraw may retain the original blob when addFiles receives an
         // existing content-derived ID, so compare realtime changes against
         // the file map that is still in the editor.
@@ -302,11 +307,15 @@ export const useEditorPersistence = ({
       refs.saveQueue.current = refs.saveQueue.current
         .catch(() => undefined)
         .then(async () => {
-          if (!saveDataRef.current || drawingSessionRef.current !== session) return;
+          if (!saveDataRef.current || drawingSessionRef.current !== session)
+            return;
           try {
             await saveDataRef.current(drawingId, elements, appState, files);
             // A successful save (autosave or explicit) clears the indicator.
-            if (drawingSessionRef.current === session && autosaveFailureCountRef.current !== 0) {
+            if (
+              drawingSessionRef.current === session &&
+              autosaveFailureCountRef.current !== 0
+            ) {
               autosaveFailureCountRef.current = 0;
               setAutosaveFailing(false);
             }
@@ -339,7 +348,8 @@ export const useEditorPersistence = ({
     if (!canEditRef.current || !drawingId || historyRestorePendingRef.current)
       return;
     const session = drawingSessionRef.current;
-    if (session.drawingId !== undefined && session.drawingId !== drawingId) return;
+    if (session.drawingId !== undefined && session.drawingId !== drawingId)
+      return;
     try {
       const snapshotFromArgs = Array.isArray(elements) ? elements : [];
       const snapshotFromRef = refs.latestElements.current ?? [];
@@ -382,9 +392,11 @@ export const useEditorPersistence = ({
         files: currentFiles,
       });
       if (
-        !canEditRef.current || historyRestorePendingRef.current ||
+        !canEditRef.current ||
+        historyRestorePendingRef.current ||
         drawingSessionRef.current !== session
-      ) return;
+      )
+        return;
       await api.updateDrawing(drawingId, { preview: svg.outerHTML });
     } catch (err) {
       console.error("Failed to save preview", err);
