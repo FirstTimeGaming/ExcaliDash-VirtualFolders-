@@ -288,7 +288,11 @@ export const useEditorCollaboration = ({
           continue;
         }
         const previous = pendingRemoteElementsRef.current.get(id);
-        const [next] = previous ? reconcileElements([previous], [el]) : [el];
+        // A live packet may still be queued for this frame. Give it the same
+        // protection from an older HTTP snapshot as an already-painted edit.
+        const [next] = previous
+          ? reconcileElements([previous], [el], undefined, fromSnapshot)
+          : [el];
         pendingRemoteElementsRef.current.set(id, next);
       }
     };

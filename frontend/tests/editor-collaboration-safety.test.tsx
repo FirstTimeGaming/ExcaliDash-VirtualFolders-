@@ -160,6 +160,50 @@ describe("remote collaboration staging", () => {
       element("peer", 3),
     );
   });
+  it("preserves realtime geometry staged before an equal-metadata persisted echo in the same frame", async () => {
+    const h = makeHarness();
+    await mount(h.Harness);
+    const realtime = element("peer-new", 1, { x: 100 });
+    sockets[0].handlers.get("element-update")({ elements: [realtime] });
+    sockets[0].handlers.get("element-update")({
+      elements: [element("peer-new", 1, { x: 0 })],
+      persisted: true,
+    });
+    await flushFrames();
+    expect(h.refs.latestElementsRef.current).toEqual([realtime]);
+    expect(h.input.recordElementVersion).toHaveBeenCalledWith(realtime);
+  });
+  it("accepts realtime geometry staged after an equal-metadata persisted echo in the same frame", async () => {
+    const h = makeHarness();
+    await mount(h.Harness);
+    sockets[0].handlers.get("element-update")({
+      elements: [element("peer-new", 1, { x: 0 })],
+      persisted: true,
+    });
+    const realtime = element("peer-new", 1, { x: 100 });
+    sockets[0].handlers.get("element-update")({ elements: [realtime] });
+    await flushFrames();
+    expect(h.refs.latestElementsRef.current).toEqual([realtime]);
+  });
+  it.each([
+    element("peer-new", 2, { x: 200 }),
+    element("peer-new", 1, { versionNonce: 0, x: 200 }),
+  ])(
+    "accepts a persisted revision winner over a pending realtime element: %j",
+    async (persisted) => {
+      const h = makeHarness();
+      await mount(h.Harness);
+      sockets[0].handlers.get("element-update")({
+        elements: [element("peer-new", 1, { x: 100 })],
+      });
+      sockets[0].handlers.get("element-update")({
+        elements: [persisted],
+        persisted: true,
+      });
+      await flushFrames();
+      expect(h.refs.latestElementsRef.current).toEqual([persisted]);
+    },
+  );
   it("compares saved image echoes against retained editor bytes so the file poll does not enqueue another save", async () => {
     const h = makeHarness();
     const original = { id: "image", dataURL: "data:image/png;base64,original" };
