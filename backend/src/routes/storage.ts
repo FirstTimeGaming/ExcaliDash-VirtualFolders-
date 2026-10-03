@@ -98,22 +98,6 @@ export const registerStorageRoutes = (
       const files: Record<string, any> = parseJsonField(drawing.files, {});
       const trimPlan = buildTrimPlan(elements, files);
 
-      // Capture candidates before committing so a new upload during cleanup
-      // cannot be swept up by this request.
-      const storedRecords = await prisma.drawingFile.findMany({
-        where: { drawingId: id },
-        select: {
-          fileId: true,
-          storage: true,
-          s3Key: true,
-          mimeType: true,
-          sizeBytes: true,
-        },
-      });
-      const s3Objects = isS3Enabled()
-        ? await listS3Objects(drawingS3Prefix(userId, id))
-        : [];
-
       // Commit the trimmed drawing FIRST, guarded on the version we read.
       // If a concurrent editor saved in between, `count` is 0 — we abort
       // with 409 instead of overwriting their newer state with our stale
@@ -129,11 +113,23 @@ export const registerStorageRoutes = (
         });
         if (updateResult.count === 0) return null;
         const retainedFileIds = await collectRetainedDrawingFileIds(tx, id);
+        // Select rows while the guarded cleanup owns the transaction. Only
+        // their exact keys can be reclaimed: an untracked S3 object may be
+        // an upload that has stored bytes but has not created its row yet.
+        const storedRecords = await tx.drawingFile.findMany({
+          where: { drawingId: id },
+          select: {
+            fileId: true,
+            storage: true,
+            s3Key: true,
+            mimeType: true,
+            sizeBytes: true,
+          },
+        });
         const plan = retainedFileIds
           ? buildTrimS3CleanupPlan({
               survivingFileIds: retainedFileIds,
               storedRecords,
-              s3Objects,
             })
           : { orphanKeys: [], orphanFileIds: [] };
         if (plan.orphanFileIds.length > 0) {

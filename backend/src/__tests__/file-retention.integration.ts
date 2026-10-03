@@ -162,6 +162,90 @@ describe("File reference lifetime", () => {
       asyncHandler,
     });
 
+  it.each(["intern", "raw"])(
+    "keeps an uploaded S3 object while its %s row has not been created",
+    async (mode) => {
+      vi.mocked(isS3Enabled).mockReturnValue(true);
+      const drawing = await createDrawing();
+      const bytes = Buffer.from([1, 2, 3]);
+      const objects = new Map<string, Buffer>();
+      let uploadStored!: () => void;
+      let resumeUpload!: () => void;
+      const stored = new Promise<void>((resolve) => {
+        uploadStored = resolve;
+      });
+      const resumed = new Promise<void>((resolve) => {
+        resumeUpload = resolve;
+      });
+      vi.mocked(uploadBuffer).mockImplementation(async (key, body) => {
+        objects.set(key, Buffer.from(body));
+        uploadStored();
+        // S3 has persisted the bytes; the uploader has not created its row.
+        await resumed;
+      });
+      vi.mocked(listS3Objects).mockImplementation(async () =>
+        [...objects].map(([key, body]) => ({ key, size: body.length })),
+      );
+      vi.mocked(deleteS3Object).mockImplementation(async (key) => {
+        objects.delete(key);
+      });
+      mountStorage();
+      mountFiles();
+      const pending =
+        mode === "intern"
+          ? internDrawingFiles(
+              {
+                image: {
+                  dataURL: "data:image/png;base64,AQID",
+                  mimeType: "image/png",
+                },
+              },
+              ownerId,
+              drawing.id,
+              prisma,
+            )
+          : request(app)
+              .put(`/drawings/${drawing.id}/files/image`)
+              .set("Content-Type", "image/png")
+              .send(bytes)
+              .then((res) => {
+                expect(res.status).toBe(200);
+                return {
+                  image: { dataURL: res.body.url, mimeType: "image/png" },
+                };
+              });
+      await stored;
+      try {
+        expect(
+          await prisma.drawingFile.count({ where: { drawingId: drawing.id } }),
+        ).toBe(0);
+        const trim = await request(app)
+          .post(`/drawings/${drawing.id}/trim`)
+          .send({ confirmName: drawing.name });
+        expect(trim.status).toBe(200);
+      } finally {
+        resumeUpload();
+      }
+      const files = await pending;
+      const saved = await applySceneUpdateTx({
+        prisma,
+        drawingId: drawing.id,
+        parseJsonField,
+        versionGuard: "optimistic",
+        mutate: () => ({
+          data: {},
+          incomingFiles: files,
+          requiredFileIds: ["image"],
+        }),
+      });
+      expect(JSON.parse(saved.drawing.files).image).toBeDefined();
+      const row = await prisma.drawingFile.findUniqueOrThrow({
+        where: { drawingId_fileId: { drawingId: drawing.id, fileId: "image" } },
+      });
+      expect(row.s3Key && objects.get(row.s3Key)?.equals(bytes)).toBe(true);
+    },
+  );
+
   it.each(["intern-private", "intern-public", "raw-private", "raw-public"])(
     "keeps recreated S3 bytes when an old deletion completes late (%s)",
     async (mode) => {

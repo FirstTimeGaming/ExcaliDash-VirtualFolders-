@@ -18,23 +18,26 @@ describe("S3 image generation keys", () => {
     expect(current).toBe(`${prefix}generation/image-id.png`);
     expect(fileIdFromS3Key(legacy)).toBe("image-id");
     expect(fileIdFromS3Key(current)).toBe("image-id");
-    const objects = [
-      { key: legacy, size: 3 },
-      { key: current, size: 3 },
+    const records = [
+      {
+        fileId: "image-id",
+        storage: "s3",
+        s3Key: current,
+        mimeType: "image/png",
+        sizeBytes: 3,
+      },
     ];
     expect(
       buildTrimS3CleanupPlan({
         survivingFileIds: new Set(["image-id"]),
-        storedRecords: [],
-        s3Objects: objects,
+        storedRecords: records,
       }).orphanKeys,
     ).toEqual([]);
     expect(
       buildTrimS3CleanupPlan({
         survivingFileIds: new Set(),
-        storedRecords: [],
-        s3Objects: objects,
+        storedRecords: records,
       }).orphanKeys,
-    ).toEqual([legacy, current]);
+    ).toEqual([current]);
   });
 });
