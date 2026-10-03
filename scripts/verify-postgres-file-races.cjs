@@ -37,6 +37,8 @@ const { registerDrawingCreateUpdateRoutes } = require(
 );
 const { registerFileRoutes } = require(path.join(dist, "routes/files"));
 const expectVulnerable = process.argv.includes("--expect-vulnerable");
+const barrierTimeoutMs = Number(process.env.RACE_BARRIER_TIMEOUT_MS || 15000);
+assert(Number.isFinite(barrierTimeoutMs) && barrierTimeoutMs > 0);
 const deferred = () => {
   let resolve;
   const promise = new Promise((done) => {
@@ -79,12 +81,6 @@ async function firstInsertRace() {
   });
   // Both inserts wait inside PostgreSQL. For the old emulated upsert this
   // ensures both missing-row reads have finished before either insert wins.
-  await prisma.$executeRawUnsafe(`CREATE OR REPLACE FUNCTION race_pause_file_insert() RETURNS trigger AS $$
-    BEGIN PERFORM pg_advisory_xact_lock(904064, 1); RETURN NEW; END;
-    $$ LANGUAGE plpgsql`);
-  await prisma.$executeRawUnsafe(`CREATE TRIGGER race_pause_file_insert BEFORE INSERT ON "DrawingFile"
-    FOR EACH ROW EXECUTE FUNCTION race_pause_file_insert()`);
-  await barrier.$executeRawUnsafe("SELECT pg_advisory_lock(904064, 1)");
   const queries = [];
   const observed = new PrismaClient({
     datasources: { db: { url: databaseUrl.href } },
@@ -99,31 +95,45 @@ async function firstInsertRace() {
     mimeType: "image/png",
     sizeBytes: 3,
   };
-  const pending = Promise.allSettled([
-    storeDrawingFileOnce(observed, { ...base, data: Buffer.from([1, 2, 3]) }),
-    storeDrawingFileOnce(observed, { ...base, data: Buffer.from([9, 9, 9]) }),
-  ]);
+  let pending;
+  let outcomes;
   try {
-    await withDeadline(
-      (async () => {
-        for (;;) {
-          const [{ waiting }] =
-            await prisma.$queryRawUnsafe(`SELECT count(*)::int AS waiting FROM pg_stat_activity
+    await prisma.$executeRawUnsafe(`CREATE OR REPLACE FUNCTION race_pause_file_insert() RETURNS trigger AS $$
+      BEGIN PERFORM pg_advisory_xact_lock(904064, 1); RETURN NEW; END;
+      $$ LANGUAGE plpgsql`);
+    await prisma.$executeRawUnsafe(`CREATE TRIGGER race_pause_file_insert BEFORE INSERT ON "DrawingFile"
+      FOR EACH ROW EXECUTE FUNCTION race_pause_file_insert()`);
+    await barrier.$executeRawUnsafe("SELECT pg_advisory_lock(904064, 1)");
+    pending = Promise.allSettled([
+      storeDrawingFileOnce(observed, { ...base, data: Buffer.from([1, 2, 3]) }),
+      storeDrawingFileOnce(observed, { ...base, data: Buffer.from([9, 9, 9]) }),
+    ]);
+    const deadline = Date.now() + barrierTimeoutMs;
+    for (;;) {
+      const [{ waiting }] =
+        await prisma.$queryRawUnsafe(`SELECT count(*)::int AS waiting FROM pg_stat_activity
           WHERE datname = current_database() AND wait_event = 'advisory' AND query LIKE '%DrawingFile%'`);
-          if (waiting === 2) break;
-          await new Promise((resolve) => setTimeout(resolve, 20));
-        }
-      })(),
-    );
+      if (waiting === 2) break;
+      if (Date.now() >= deadline) throw new Error("race barrier timed out");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
   } finally {
-    await barrier.$executeRawUnsafe("SELECT pg_advisory_unlock(904064, 1)");
+    // Unlock before draining blocked inserts, even if their expected overlap
+    // never occurs (for example, a one-connection pool). No polling coroutine
+    // survives this scope, and a failed check leaves no trigger behind.
+    try {
+      await barrier.$executeRawUnsafe("SELECT pg_advisory_unlock(904064, 1)");
+      if (pending) outcomes = await pending;
+    } finally {
+      await observed.$disconnect();
+      await prisma.$executeRawUnsafe(
+        'DROP TRIGGER IF EXISTS race_pause_file_insert ON "DrawingFile"',
+      );
+      await prisma.$executeRawUnsafe(
+        "DROP FUNCTION IF EXISTS race_pause_file_insert()",
+      );
+    }
   }
-  const outcomes = await pending;
-  await observed.$disconnect();
-  await prisma.$executeRawUnsafe(
-    'DROP TRIGGER race_pause_file_insert ON "DrawingFile"',
-  );
-  await prisma.$executeRawUnsafe("DROP FUNCTION race_pause_file_insert()");
   const rejected = outcomes.filter((outcome) => outcome.status === "rejected");
   const nativeInserts = queries.filter(
     (query) =>
