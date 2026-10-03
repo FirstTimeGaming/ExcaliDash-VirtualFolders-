@@ -164,8 +164,23 @@ export const registerFileRoutes = (
       }
 
       if (isS3Enabled()) {
+        // Collaborators may upload, but storage listing and drawing cleanup
+        // use the drawing owner's namespace, just like inline scene files.
+        const drawing = await prisma.drawing.findUnique({
+          where: { id: drawingId },
+          select: { userId: true },
+        });
+        if (!drawing) {
+          return res.status(404).json({ error: "Drawing not found" });
+        }
         const ext = MIME_TO_EXT[mimeType] ?? "bin";
-        const s3Key = buildS3Key(userId, drawingId, fileId, ext, randomUUID());
+        const s3Key = buildS3Key(
+          drawing.userId,
+          drawingId,
+          fileId,
+          ext,
+          randomUUID(),
+        );
         await uploadBuffer(s3Key, body, mimeType);
         const stored = await storeDrawingFileOnce(prisma, {
           drawingId,

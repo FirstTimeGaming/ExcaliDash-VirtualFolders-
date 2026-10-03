@@ -162,6 +162,77 @@ describe("File reference lifetime", () => {
       asyncHandler,
     });
 
+  it("lists a collaborator's first raw S3 upload in the drawing owner's storage namespace", async () => {
+    vi.mocked(isS3Enabled).mockReturnValue(true);
+    const peer = await prisma.user.create({
+      data: {
+        email: "peer-retention@test.local",
+        passwordHash: "unused",
+        name: "Peer",
+      },
+    });
+    const drawing = await createDrawing();
+    await prisma.drawingPermission.create({
+      data: {
+        drawingId: drawing.id,
+        granteeUserId: peer.id,
+        permission: "edit",
+        createdByUserId: ownerId,
+      },
+    });
+    auth = (req, _res, next) => {
+      req.user = {
+        id: req.headers["x-test-user-id"] || ownerId,
+      } as express.Request["user"];
+      next();
+    };
+    const objects = new Map<string, Buffer>();
+    vi.mocked(uploadBuffer).mockImplementation(async (key, bytes) => {
+      objects.set(key, bytes);
+    });
+    vi.mocked(listS3Objects).mockImplementation(async (prefix) =>
+      [...objects]
+        .filter(([key]) => key.startsWith(prefix))
+        .map(([key, bytes]) => ({ key, size: bytes.length })),
+    );
+    mountFiles();
+    mountStorage();
+    const bytes = Buffer.from([1, 2, 3]);
+    const uploaded = await request(app)
+      .put(`/drawings/${drawing.id}/files/peer-first`)
+      .set("x-test-user-id", peer.id)
+      .set("Content-Type", "image/png")
+      .send(bytes);
+    expect(uploaded.status).toBe(200);
+    const downloaded = await request(app).get(
+      `/files/${drawing.id}/peer-first`,
+    );
+    expect(downloaded.status).toBe(302);
+    const diff = await request(app).get(`/drawings/${drawing.id}/files/diff`);
+    expect(diff.status).toBe(200);
+    expect(diff.body.files).toEqual([
+      expect.objectContaining({
+        fileId: "peer-first",
+        inS3: true,
+        inS3Record: true,
+      }),
+    ]);
+    const row = await prisma.drawingFile.findUnique({
+      where: {
+        drawingId_fileId: { drawingId: drawing.id, fileId: "peer-first" },
+      },
+    });
+    expect(row?.s3Key).toMatch(new RegExp(`^${ownerId}/${drawing.id}/`));
+    expect(objects.get(row!.s3Key!)).toEqual(bytes);
+    const retried = await request(app)
+      .put(`/drawings/${drawing.id}/files/peer-first`)
+      .set("Content-Type", "image/png")
+      .send(Buffer.from([9, 9, 9]));
+    expect(retried.status).toBe(200);
+    expect(objects.size).toBe(1);
+    expect(objects.get(row!.s3Key!)).toEqual(bytes);
+  });
+
   it.each(["intern", "raw"])(
     "keeps an uploaded S3 object while its %s row has not been created",
     async (mode) => {
