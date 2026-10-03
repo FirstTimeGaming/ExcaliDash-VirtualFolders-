@@ -37,6 +37,7 @@ export const registerDrawingCreateUpdateRoutes = (
     parseJsonField,
     getRequestPrincipal,
     respondWithAuthErrorIfPresent,
+    io,
   } = context;
 
   // Interning writes DrawingFile rows (and S3 blobs) before the scene
@@ -415,15 +416,30 @@ export const registerDrawingCreateUpdateRoutes = (
       }
       invalidateDrawingsCache();
 
+      const savedElements = parseJsonField(updatedDrawing.elements, []);
+      const savedFiles = parseJsonField(updatedDrawing.files, {});
+      if (isSceneUpdate) {
+        // A peer can join after the realtime delta but before this autosave.
+        // Deliver the committed scene so that edit is eventually received.
+        io?.to(`drawing_${id}`).emit("element-update", {
+          drawingId: id,
+          elements: savedElements,
+          files: savedFiles,
+          elementOrder: savedElements
+            .map((element: { id?: unknown } | null) => element?.id)
+            .filter((elementId: unknown) => typeof elementId === "string"),
+        });
+      }
+
       return res.json({
         ...updatedDrawing,
         collectionId: toPublicTrashCollectionId(
           updatedDrawing.collectionId,
           ownerUserId,
         ),
-        elements: parseJsonField(updatedDrawing.elements, []),
+        elements: savedElements,
         appState: parseJsonField(updatedDrawing.appState, {}),
-        files: parseJsonField(updatedDrawing.files, {}),
+        files: savedFiles,
         accessLevel: access,
       });
     }),
