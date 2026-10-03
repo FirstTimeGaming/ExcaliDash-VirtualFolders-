@@ -8,8 +8,8 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 const read = (file) =>
   readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
 const nginx = read("frontend/nginx.conf.template");
-const listenPorts = [...nginx.matchAll(/\blisten\s+(\d+)\s*;/g)].map(
-  (match) => Number(match[1]),
+const listenPorts = [...nginx.matchAll(/\blisten\s+(\d+)\s*;/g)].map((match) =>
+  Number(match[1]),
 );
 // Expand YAML anchors using Compose itself; do not start any services.
 const { services } = JSON.parse(
