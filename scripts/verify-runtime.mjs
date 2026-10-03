@@ -405,6 +405,12 @@ try {
   } else if (process.argv.includes("--check-restart")) {
     const state = JSON.parse(await readFile(statePath, "utf8"));
     assert.equal(state.origin, origin);
+    if (state.ownerUserId)
+      assert.equal(
+        owner.user.id,
+        state.ownerUserId,
+        "nginx must route back to the same account database after backend restart",
+      );
     await scenario(
       "backend restart preserves scenes, histories, image bytes, and reconnect",
       async () => {
@@ -412,6 +418,8 @@ try {
           const actual = await owner.request(`/drawings/${expected.id}`);
           assert.deepEqual(actual.elements, expected.elements);
           assert.deepEqual(actual.files, expected.files);
+          if (expected.appState)
+            assert.deepEqual(actual.appState, expected.appState);
           assert.equal(actual.version, expected.version);
           const history = await owner.request(
             `/drawings/${expected.id}/history`,
@@ -891,6 +899,7 @@ try {
       expectations.push({
         id: actual.id,
         elements: actual.elements,
+        appState: actual.appState,
         files: actual.files,
         version: actual.version,
         historyCount: (await owner.request(`/drawings/${fixture.id}/history`))
@@ -900,7 +909,12 @@ try {
     await writeFile(
       statePath,
       JSON.stringify(
-        { origin, sharedDrawingId: drawing.id, drawings: expectations },
+        {
+          origin,
+          ownerUserId: owner.user.id,
+          sharedDrawingId: drawing.id,
+          drawings: expectations,
+        },
         null,
         2,
       ),
