@@ -597,12 +597,24 @@ describe("File reference lifetime", () => {
     };
     try {
       const rows = await Promise.all([
-        storeDrawingFileOnce(observed, { ...base, data: Buffer.from([1, 2, 3]) }),
-        storeDrawingFileOnce(observed, { ...base, data: Buffer.from([9, 9, 9]) }),
+        storeDrawingFileOnce(observed, {
+          ...base,
+          data: Buffer.from([1, 2, 3]),
+        }),
+        storeDrawingFileOnce(observed, {
+          ...base,
+          data: Buffer.from([9, 9, 9]),
+        }),
       ]);
-      expect(Buffer.from(rows[0].data!).equals(Buffer.from(rows[1].data!))).toBe(true);
-      expect(queries.filter((query) => /INSERT INTO.*DrawingFile/.test(query))).toHaveLength(2);
-      expect(queries.filter((query) => /ON CONFLICT.*DO UPDATE/.test(query))).toHaveLength(2);
+      expect(
+        Buffer.from(rows[0].data!).equals(Buffer.from(rows[1].data!)),
+      ).toBe(true);
+      expect(
+        queries.filter((query) => /INSERT INTO.*DrawingFile/.test(query)),
+      ).toHaveLength(2);
+      expect(
+        queries.filter((query) => /ON CONFLICT.*DO UPDATE/.test(query)),
+      ).toHaveLength(2);
     } finally {
       await observed.$disconnect();
     }
@@ -615,7 +627,12 @@ describe("File reference lifetime", () => {
       const drawing = await createDrawing();
       mountStorage();
       mountDrawingUpdates(async (files, userId, drawingId) => {
-        const processed = await internDrawingFiles(files, userId, drawingId, prisma);
+        const processed = await internDrawingFiles(
+          files,
+          userId,
+          drawingId,
+          prisma,
+        );
         // An unrelated save advances the scene after this request passed its
         // preflight. Its image could still be used by another in-flight save.
         await prisma.drawing.update({
@@ -629,7 +646,12 @@ describe("File reference lifetime", () => {
         .send({
           version: 1,
           elements: [],
-          files: { image: { dataURL: "data:image/png;base64,AQID", mimeType: "image/png" } },
+          files: {
+            image: {
+              dataURL: "data:image/png;base64,AQID",
+              mimeType: "image/png",
+            },
+          },
         });
       expect(failed.status).toBe(409);
       const tracked = await prisma.drawingFile.findUniqueOrThrow({
@@ -641,7 +663,9 @@ describe("File reference lifetime", () => {
         .post(`/drawings/${drawing.id}/trim`)
         .send({ confirmName: drawing.name });
       expect(trimmed.status).toBe(200);
-      expect(await prisma.drawingFile.count({ where: { drawingId: drawing.id } })).toBe(0);
+      expect(
+        await prisma.drawingFile.count({ where: { drawingId: drawing.id } }),
+      ).toBe(0);
       if (storage === "s3") {
         expect(deleteS3Object).toHaveBeenCalledExactlyOnceWith(tracked.s3Key);
       }
