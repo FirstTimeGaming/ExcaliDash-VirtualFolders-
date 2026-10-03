@@ -40,11 +40,9 @@ export const registerDrawingCreateUpdateRoutes = (
     io,
   } = context;
 
-  // Interning writes DrawingFile rows (and S3 blobs) before the scene
-  // transaction runs. If the save then fails — most commonly a version
-  // conflict — the freshly created rows would otherwise be orphaned forever.
-  // This compensation deletes only rows this request created (absent before
-  // interning) that the authoritative scene still does not reference.
+  // Compensate only failed creation under this request's unpublished UUID.
+  // Failed updates keep their tracked rows for version-guarded trim: another
+  // editor may be committing references to those bytes at the same time.
   const cleanupUnreferencedInternedFiles = async (
     drawingId: string,
     knownBefore: Set<string>,
@@ -383,17 +381,10 @@ export const registerDrawingCreateUpdateRoutes = (
           });
         }
       } catch (error) {
-        if (
-          isSceneUpdate &&
-          processedFilesForUpdate &&
-          knownFileIdsBeforeUpdate
-        ) {
-          await cleanupUnreferencedInternedFiles(
-            id,
-            knownFileIdsBeforeUpdate,
-            processedFilesForUpdate,
-          );
-        }
+        // Do not reclaim interned rows here. Under PostgreSQL READ COMMITTED,
+        // a concurrent valid save may have checked these rows without having
+        // committed its scene yet. Guarded trim reclaims unused rows and their
+        // exact S3 generations after owning the drawing's version update.
         if (isVersionConflict(error)) {
           const latestDrawing = await prisma.drawing.findFirst({
             where: { id },

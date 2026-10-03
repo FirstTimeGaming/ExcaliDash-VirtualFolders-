@@ -28,7 +28,10 @@ export const storeDrawingFileOnce = async (
   const stored = await prisma.drawingFile.upsert({
     where,
     create: content,
-    update: {},
+    // An empty update disables Prisma's native INSERT ... ON CONFLICT path.
+    // Assign the same immutable id so simultaneous first uploads both return
+    // the winning row without changing its content or raising P2002.
+    update: { fileId },
   });
   if (hasDrawingFileContent(stored)) return stored;
 

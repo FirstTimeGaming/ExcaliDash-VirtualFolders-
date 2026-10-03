@@ -11,7 +11,7 @@ import express from "express";
 import request from "supertest";
 import { z } from "zod";
 import type { Server } from "socket.io";
-import type { PrismaClient } from "../generated/client";
+import { PrismaClient } from "../generated/client";
 import { getTestPrisma, setupTestDb, cleanupTestDb } from "./testUtils";
 import { encodeSnapshotField } from "../snapshots/snapshotCodec";
 import { registerStorageRoutes } from "../routes/storage";
@@ -578,6 +578,75 @@ describe("File reference lifetime", () => {
         Buffer.from(rows[0].data).equals(Buffer.from(rows[1].data)),
     ).toBe(true);
   });
+
+  it("uses a native upsert for simultaneous first stores without changing winner bytes", async () => {
+    const drawing = await createDrawing();
+    const observed = new PrismaClient({
+      datasources: { db: { url: process.env.DATABASE_URL! } },
+      log: [{ level: "query", emit: "event" }],
+    });
+    const queries: string[] = [];
+    observed.$on("query", (event) => queries.push(event.query));
+    const base = {
+      drawingId: drawing.id,
+      fileId: "new-image",
+      storage: "db",
+      s3Key: null,
+      mimeType: "image/png",
+      sizeBytes: 3,
+    };
+    try {
+      const rows = await Promise.all([
+        storeDrawingFileOnce(observed, { ...base, data: Buffer.from([1, 2, 3]) }),
+        storeDrawingFileOnce(observed, { ...base, data: Buffer.from([9, 9, 9]) }),
+      ]);
+      expect(Buffer.from(rows[0].data!).equals(Buffer.from(rows[1].data!))).toBe(true);
+      expect(queries.filter((query) => /INSERT INTO.*DrawingFile/.test(query))).toHaveLength(2);
+      expect(queries.filter((query) => /ON CONFLICT.*DO UPDATE/.test(query))).toHaveLength(2);
+    } finally {
+      await observed.$disconnect();
+    }
+  });
+
+  it.each(["db", "s3"])(
+    "keeps a failed update's tracked %s image until guarded trim reclaims it",
+    async (storage) => {
+      vi.mocked(isS3Enabled).mockReturnValue(storage === "s3");
+      const drawing = await createDrawing();
+      mountStorage();
+      mountDrawingUpdates(async (files, userId, drawingId) => {
+        const processed = await internDrawingFiles(files, userId, drawingId, prisma);
+        // An unrelated save advances the scene after this request passed its
+        // preflight. Its image could still be used by another in-flight save.
+        await prisma.drawing.update({
+          where: { id: drawingId },
+          data: { version: { increment: 1 } },
+        });
+        return processed;
+      });
+      const failed = await request(app)
+        .put(`/drawings/${drawing.id}`)
+        .send({
+          version: 1,
+          elements: [],
+          files: { image: { dataURL: "data:image/png;base64,AQID", mimeType: "image/png" } },
+        });
+      expect(failed.status).toBe(409);
+      const tracked = await prisma.drawingFile.findUniqueOrThrow({
+        where: { drawingId_fileId: { drawingId: drawing.id, fileId: "image" } },
+      });
+      expect(tracked.storage).toBe(storage);
+      expect(deleteS3Object).not.toHaveBeenCalled();
+      const trimmed = await request(app)
+        .post(`/drawings/${drawing.id}/trim`)
+        .send({ confirmName: drawing.name });
+      expect(trimmed.status).toBe(200);
+      expect(await prisma.drawingFile.count({ where: { drawingId: drawing.id } })).toBe(0);
+      if (storage === "s3") {
+        expect(deleteS3Object).toHaveBeenCalledExactlyOnceWith(tracked.s3Key);
+      }
+    },
+  );
 
   it("copies a generated S3 object into an independent drawing key", async () => {
     vi.mocked(isS3Enabled).mockReturnValue(true);
