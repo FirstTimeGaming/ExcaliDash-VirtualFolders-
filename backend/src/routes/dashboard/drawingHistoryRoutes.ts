@@ -137,6 +137,29 @@ export const registerDrawingHistoryRoutes = (
       const restoredAppState = decodeSnapshotField(snapshot.appState);
       const restoredFiles = decodeSnapshotField(snapshot.files);
 
+      // Plain snapshots can also be corrupt. The read path's JSON fallback
+      // must never turn invalid history into a successful empty-scene restore.
+      try {
+        const elements: unknown = JSON.parse(restoredElements);
+        const appState: unknown = JSON.parse(restoredAppState);
+        const files: unknown = JSON.parse(restoredFiles);
+        const isRecord = (value: unknown) =>
+          value !== null && typeof value === "object" && !Array.isArray(value);
+        if (
+          !Array.isArray(elements) ||
+          !isRecord(appState) ||
+          !isRecord(files)
+        ) {
+          throw new Error("Invalid snapshot structure");
+        }
+      } catch {
+        return res.status(400).json({
+          error: "Invalid drawing history snapshot",
+          message:
+            "The snapshot cannot be restored without losing drawing data.",
+        });
+      }
+
       // Share the save path's transaction and version guard: the backup and
       // restore must succeed together, without overwriting a concurrent save.
       let updated;

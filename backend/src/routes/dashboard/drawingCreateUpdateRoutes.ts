@@ -15,6 +15,7 @@ import {
 } from "./trash";
 import type { DrawingRouteContext } from "./drawingRouteContext";
 import { applySceneUpdateTx, isVersionConflict } from "./sceneUpdate";
+import { collectRetainedDrawingFileIds } from "../storage/retainedFiles";
 
 export const registerDrawingCreateUpdateRoutes = (
   app: express.Express,
@@ -36,13 +37,12 @@ export const registerDrawingCreateUpdateRoutes = (
     parseJsonField,
     getRequestPrincipal,
     respondWithAuthErrorIfPresent,
+    io,
   } = context;
 
-  // Interning writes DrawingFile rows (and S3 blobs) before the scene
-  // transaction runs. If the save then fails — most commonly a version
-  // conflict — the freshly created rows would otherwise be orphaned forever.
-  // This compensation deletes only rows this request created (absent before
-  // interning) that the authoritative scene still does not reference.
+  // Compensate only failed creation under this request's unpublished UUID.
+  // Failed updates keep their tracked rows for version-guarded trim: another
+  // editor may be committing references to those bytes at the same time.
   const cleanupUnreferencedInternedFiles = async (
     drawingId: string,
     knownBefore: Set<string>,
@@ -54,13 +54,8 @@ export const registerDrawingCreateUpdateRoutes = (
     if (candidates.length === 0) return;
     try {
       await prisma.$transaction(async (tx) => {
-        const current = await tx.drawing.findUnique({
-          where: { id: drawingId },
-          select: { files: true },
-        });
-        const referenced = new Set(
-          Object.keys(parseJsonField(current?.files ?? "{}", {})),
-        );
+        const referenced = await collectRetainedDrawingFileIds(tx, drawingId);
+        if (!referenced) return;
         const deletable = candidates.filter(
           (fileId) => !referenced.has(fileId),
         );
@@ -278,6 +273,7 @@ export const registerDrawingCreateUpdateRoutes = (
       if (payload.appState !== undefined)
         data.appState = JSON.stringify(payload.appState);
       let processedFilesForUpdate: Record<string, unknown> | undefined;
+      let requiredFileIdsForUpdate: string[] | undefined;
       let knownFileIdsBeforeUpdate: Set<string> | null = null;
       if (payload.files !== undefined) {
         knownFileIdsBeforeUpdate = await listDrawingFileIds(id);
@@ -286,6 +282,23 @@ export const registerDrawingCreateUpdateRoutes = (
           ownerUserId,
           id,
         );
+        requiredFileIdsForUpdate = Object.entries(processedFilesForUpdate)
+          .filter(([fileId, file]) => {
+            const processedUrl = (file as { dataURL?: unknown } | null)
+              ?.dataURL;
+            const originalUrl = (
+              payload.files?.[fileId] as { dataURL?: unknown } | null
+            )?.dataURL;
+            return (
+              knownFileIdsBeforeUpdate!.has(fileId) ||
+              processedUrl === `/api/files/${id}/${fileId}` ||
+              (typeof originalUrl === "string" &&
+                originalUrl.startsWith("data:") &&
+                typeof processedUrl === "string" &&
+                processedUrl !== originalUrl)
+            );
+          })
+          .map(([fileId]) => fileId);
         // Note: data.files is not assigned here. The union merge with the
         // authoritative current state happens inside the transaction so a
         // concurrent client's files are never whole-replaced away.
@@ -348,7 +361,11 @@ export const registerDrawingCreateUpdateRoutes = (
             versionGuard:
               payload.version !== undefined ? payload.version : "optimistic",
             maxRetries: payload.version === undefined ? 2 : 0,
-            mutate: () => ({ data, incomingFiles: processedFilesForUpdate }),
+            mutate: () => ({
+              data,
+              incomingFiles: processedFilesForUpdate,
+              requiredFileIds: requiredFileIdsForUpdate,
+            }),
           });
           updatedDrawing = result.drawing;
         } else {
@@ -364,23 +381,16 @@ export const registerDrawingCreateUpdateRoutes = (
           });
         }
       } catch (error) {
-        if (
-          isSceneUpdate &&
-          processedFilesForUpdate &&
-          knownFileIdsBeforeUpdate
-        ) {
-          await cleanupUnreferencedInternedFiles(
-            id,
-            knownFileIdsBeforeUpdate,
-            processedFilesForUpdate,
-          );
-        }
+        // Do not reclaim interned rows here. Under PostgreSQL READ COMMITTED,
+        // a concurrent valid save may have checked these rows without having
+        // committed its scene yet. Guarded trim reclaims unused rows and their
+        // exact S3 generations after owning the drawing's version update.
         if (isVersionConflict(error)) {
           const latestDrawing = await prisma.drawing.findFirst({
             where: { id },
             select: { version: true },
           });
-          if (isSceneUpdate && payload.version !== undefined) {
+          if (isSceneUpdate) {
             return res.status(409).json({
               error: "Conflict",
               code: "VERSION_CONFLICT",
@@ -397,15 +407,31 @@ export const registerDrawingCreateUpdateRoutes = (
       }
       invalidateDrawingsCache();
 
+      const savedElements = parseJsonField(updatedDrawing.elements, []);
+      const savedFiles = parseJsonField(updatedDrawing.files, {});
+      if (isSceneUpdate) {
+        // A peer can join after the realtime delta but before this autosave.
+        // Deliver the committed scene so that edit is eventually received.
+        io?.to(`drawing_${id}`).emit("element-update", {
+          drawingId: id,
+          persisted: true,
+          elements: savedElements,
+          files: savedFiles,
+          elementOrder: savedElements
+            .map((element: { id?: unknown } | null) => element?.id)
+            .filter((elementId: unknown) => typeof elementId === "string"),
+        });
+      }
+
       return res.json({
         ...updatedDrawing,
         collectionId: toPublicTrashCollectionId(
           updatedDrawing.collectionId,
           ownerUserId,
         ),
-        elements: parseJsonField(updatedDrawing.elements, []),
+        elements: savedElements,
         appState: parseJsonField(updatedDrawing.appState, {}),
-        files: parseJsonField(updatedDrawing.files, {}),
+        files: savedFiles,
         accessLevel: access,
       });
     }),

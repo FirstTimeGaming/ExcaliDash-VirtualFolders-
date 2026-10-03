@@ -269,6 +269,66 @@ describe("DrawingFile store (database-bytes mode)", () => {
     expect(res.status).toBe(200);
   });
 
+  it("does not overwrite uploaded image bytes when a stale scene save conflicts", async () => {
+    const drawing = await createDrawing(owner.id);
+    await prisma.drawing.update({
+      where: { id: drawing.id },
+      data: { version: 2 },
+    });
+    await uploadFile(drawing.id, "img-existing", ownerToken, PNG_BYTES);
+    const res = await agent
+      .put(`/drawings/${drawing.id}`)
+      .set("User-Agent", userAgent)
+      .set(csrfHeaderName, csrfToken)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({
+        version: 1,
+        elements: [],
+        files: {
+          "img-existing": {
+            id: "img-existing",
+            mimeType: "image/png",
+            dataURL: "data:image/png;base64,AAAA",
+          },
+        },
+      });
+    expect(res.status).toBe(409);
+    const image = await agent
+      .get(`/files/${drawing.id}/img-existing`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(image.status).toBe(200);
+    expect(Buffer.from(image.body).equals(PNG_BYTES)).toBe(true);
+  });
+
+  it("keeps immutable uploaded image bytes when an old scene resends the file id", async () => {
+    const drawing = await createDrawing(owner.id);
+    await uploadFile(drawing.id, "img-existing", ownerToken, PNG_BYTES);
+    const res = await agent
+      .put(`/drawings/${drawing.id}`)
+      .set("User-Agent", userAgent)
+      .set(csrfHeaderName, csrfToken)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({
+        elements: [],
+        files: {
+          "img-existing": {
+            id: "img-existing",
+            mimeType: "image/png",
+            dataURL: "data:image/png;base64,AAAA",
+          },
+        },
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.files["img-existing"].dataURL).toBe(
+      `/api/files/${drawing.id}/img-existing`,
+    );
+    const image = await agent
+      .get(`/files/${drawing.id}/img-existing`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(image.status).toBe(200);
+    expect(Buffer.from(image.body).equals(PNG_BYTES)).toBe(true);
+  });
+
   it("rebases copied preview images so deleting the source keeps the copy usable", async () => {
     const drawing = await createDrawing(owner.id);
     await uploadFile(drawing.id, "img-copy", ownerToken, PNG_BYTES);

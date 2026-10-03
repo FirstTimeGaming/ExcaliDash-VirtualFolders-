@@ -8,6 +8,14 @@ http {
     include /etc/nginx/mime.types;
     default_type application/octet-stream;
 
+    # Docker can assign a different backend IP after a restart. Its embedded
+    # resolver keeps this upstream current without restarting the frontend.
+    __BACKEND_RESOLVER_CONFIG__
+    upstream excalidash_backend {
+        zone excalidash_backend 64k;
+        server __BACKEND_URL__ __BACKEND_RESOLVE__;
+    }
+
     # Preserve upstream TLS context (if present) when proxying to backend.
     # Falls back to current scheme when no forwarded proto is provided.
     map $http_x_forwarded_proto $forwarded_proto {
@@ -45,7 +53,7 @@ http {
         # API and WebSocket proxy to backend
         # BACKEND_URL is substituted at container startup (default: backend:8000)
         location /api/ {
-            proxy_pass http://__BACKEND_URL__/;
+            proxy_pass http://excalidash_backend/;
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection 'upgrade';
@@ -70,7 +78,7 @@ http {
 
         # WebSocket proxy for Socket.IO
         location /socket.io/ {
-            proxy_pass http://__BACKEND_URL__/socket.io/;
+            proxy_pass http://excalidash_backend/socket.io/;
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection 'upgrade';

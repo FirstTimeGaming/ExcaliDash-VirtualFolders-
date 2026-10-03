@@ -7,8 +7,7 @@ import { encodeSnapshotField } from "../../snapshots/snapshotCodec";
 const isBlankFileEntry = (entry: unknown): boolean => {
   if (!entry || typeof entry !== "object") return true;
   const dataURL = (entry as { dataURL?: unknown }).dataURL;
-  if (typeof dataURL === "string") return dataURL.length === 0;
-  return false;
+  return typeof dataURL !== "string" || dataURL.length === 0;
 };
 
 // Merge incoming files into the existing set by fileId (union). Removal is
@@ -54,6 +53,9 @@ type SceneMutation = {
   // Already-processed (interned/sanitized) files to union-merge into the
   // authoritative current files. `undefined` leaves files untouched.
   incomingFiles?: Record<string, unknown>;
+  // Interned/managed references must still have their bytes when the scene
+  // commits. Storage cleanup may have reclaimed them since interning ran.
+  requiredFileIds?: string[];
 };
 
 type ApplySceneUpdateArgs = {
@@ -105,6 +107,17 @@ export const applySceneUpdateTx = async (
         }
 
         const mutation = await mutate(current);
+
+        if (mutation.requiredFileIds?.length) {
+          const requiredIds = new Set(mutation.requiredFileIds);
+          const stored = await tx.drawingFile.findMany({
+            where: { drawingId, fileId: { in: [...requiredIds] } },
+            select: { fileId: true },
+          });
+          if (stored.length !== requiredIds.size) {
+            throw versionConflictError;
+          }
+        }
 
         await tx.drawingSnapshot.create({
           data: {

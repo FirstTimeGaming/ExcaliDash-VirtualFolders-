@@ -6,6 +6,10 @@ import {
   RegisterImportExportDeps,
   ImportValidationError,
   assertSafeZipArchive,
+  assertImportedScene,
+  replaceImportedDrawing,
+  getRequiredImportedFileIds,
+  assertImportedFilesAvailable,
   excalidashManifestSchemaV1,
   findFirstDuplicate,
   getSafeZipEntry,
@@ -335,22 +339,14 @@ export const registerExcalidashImportRoutes = (
             }
             const imported = {
               name: d.name,
-              elements: Array.isArray(parsedJson?.elements)
-                ? parsedJson.elements
-                : [],
+              elements: parsedJson?.elements,
               appState:
-                typeof parsedJson?.appState === "object" &&
-                parsedJson.appState !== null
-                  ? parsedJson.appState
-                  : {},
-              files:
-                typeof parsedJson?.files === "object" &&
-                parsedJson.files !== null
-                  ? parsedJson.files
-                  : {},
+                parsedJson?.appState === undefined ? {} : parsedJson.appState,
+              files: parsedJson?.files === undefined ? {} : parsedJson.files,
               preview: null as string | null,
               collectionId: d.collectionId,
             };
+            assertImportedScene(imported);
             if (!validateImportedDrawing(imported)) {
               throw new ImportValidationError(
                 `Drawing failed validation: ${d.filePath}`,
@@ -372,6 +368,7 @@ export const registerExcalidashImportRoutes = (
           }
           throw error;
         }
+        const knownFileIdsBeforeImport = new Map<number, Set<string>>();
         const finalDrawingIdMap = new Map<number, string>();
         for (let i = 0; i < preparedDrawings.length; i++) {
           const prepared = preparedDrawings[i];
@@ -384,6 +381,14 @@ export const registerExcalidashImportRoutes = (
               ? uuidv4()
               : prepared.id;
           finalDrawingIdMap.set(i, finalId);
+          const knownFiles = await prisma.drawingFile.findMany({
+            where: { drawingId: finalId },
+            select: { fileId: true },
+          });
+          knownFileIdsBeforeImport.set(
+            i,
+            new Set(knownFiles.map((file) => file.fileId)),
+          );
         }
         const S3_UPLOAD_CONCURRENCY = 8;
         const processedFilesMap = new Map<number, Record<string, any>>();
@@ -410,85 +415,132 @@ export const registerExcalidashImportRoutes = (
             processedFilesMap.set(i, processed);
           }
         }
-        const result = await prisma.$transaction(async (tx) => {
-          const trashCollectionId = getUserTrashCollectionId(req.user!.id);
-          const collectionIdMap = new Map<string, string>();
-          let collectionsCreated = 0;
-          let collectionsUpdated = 0;
-          let collectionIdConflicts = 0;
-          let drawingsCreated = 0;
-          let drawingsUpdated = 0;
-          let drawingIdConflicts = 0;
-          const needsTrash =
-            manifest.collections.some((c) => c.id === "trash") ||
-            preparedDrawings.some((d) => d.collectionId === "trash");
-          if (needsTrash) await ensureTrashCollection(tx, req.user!.id);
-          for (const c of manifest.collections) {
-            if (c.id === "trash") {
-              collectionIdMap.set("trash", trashCollectionId);
-              continue;
-            }
-            const existing = await tx.collection.findUnique({
-              where: { id: c.id },
-            });
-            if (!existing) {
+        try {
+          const result = await prisma.$transaction(async (tx) => {
+            const trashCollectionId = getUserTrashCollectionId(req.user!.id);
+            const collectionIdMap = new Map<string, string>();
+            let collectionsCreated = 0;
+            let collectionsUpdated = 0;
+            let collectionIdConflicts = 0;
+            let drawingsCreated = 0;
+            let drawingsUpdated = 0;
+            let drawingIdConflicts = 0;
+            const needsTrash =
+              manifest.collections.some((c) => c.id === "trash") ||
+              preparedDrawings.some((d) => d.collectionId === "trash");
+            if (needsTrash) await ensureTrashCollection(tx, req.user!.id);
+            for (const c of manifest.collections) {
+              if (c.id === "trash") {
+                collectionIdMap.set("trash", trashCollectionId);
+                continue;
+              }
+              const existing = await tx.collection.findUnique({
+                where: { id: c.id },
+              });
+              if (!existing) {
+                await tx.collection.create({
+                  data: {
+                    id: c.id,
+                    name: sanitizeText(c.name, 100) || "Collection",
+                    userId: req.user!.id,
+                  },
+                });
+                collectionIdMap.set(c.id, c.id);
+                collectionsCreated += 1;
+                continue;
+              }
+              if (existing.userId === req.user!.id) {
+                await tx.collection.update({
+                  where: { id: c.id },
+                  data: { name: sanitizeText(c.name, 100) || "Collection" },
+                });
+                collectionIdMap.set(c.id, c.id);
+                collectionsUpdated += 1;
+                continue;
+              }
+              const newId = uuidv4();
               await tx.collection.create({
                 data: {
-                  id: c.id,
+                  id: newId,
                   name: sanitizeText(c.name, 100) || "Collection",
                   userId: req.user!.id,
                 },
               });
-              collectionIdMap.set(c.id, c.id);
+              collectionIdMap.set(c.id, newId);
               collectionsCreated += 1;
-              continue;
+              collectionIdConflicts += 1;
             }
-            if (existing.userId === req.user!.id) {
-              await tx.collection.update({
-                where: { id: c.id },
-                data: { name: sanitizeText(c.name, 100) || "Collection" },
+            const resolveCollectionId = (
+              collectionId: string | null,
+            ): string | null => {
+              if (!collectionId) return null;
+              if (collectionId === "trash") return trashCollectionId;
+              return collectionIdMap.get(collectionId) || null;
+            };
+            for (let i = 0; i < preparedDrawings.length; i++) {
+              const prepared = preparedDrawings[i];
+              const processedFiles = processedFilesMap.get(i) ?? {};
+              const targetCollectionId = resolveCollectionId(
+                prepared.collectionId,
+              );
+              const existing = await tx.drawing.findUnique({
+                where: { id: prepared.id },
               });
-              collectionIdMap.set(c.id, c.id);
-              collectionsUpdated += 1;
-              continue;
-            }
-            const newId = uuidv4();
-            await tx.collection.create({
-              data: {
-                id: newId,
-                name: sanitizeText(c.name, 100) || "Collection",
-                userId: req.user!.id,
-              },
-            });
-            collectionIdMap.set(c.id, newId);
-            collectionsCreated += 1;
-            collectionIdConflicts += 1;
-          }
-          const resolveCollectionId = (
-            collectionId: string | null,
-          ): string | null => {
-            if (!collectionId) return null;
-            if (collectionId === "trash") return trashCollectionId;
-            return collectionIdMap.get(collectionId) || null;
-          };
-          for (let i = 0; i < preparedDrawings.length; i++) {
-            const prepared = preparedDrawings[i];
-            const processedFiles = processedFilesMap.get(i) ?? {};
-            const targetCollectionId = resolveCollectionId(
-              prepared.collectionId,
-            );
-            const existing = await tx.drawing.findUnique({
-              where: { id: prepared.id },
-            });
-            const finalId = finalDrawingIdMap.get(i) ?? prepared.id;
-            const elementsJson = JSON.stringify(prepared.sanitized!.elements);
-            const appStateJson = JSON.stringify(prepared.sanitized!.appState);
-            const filesJson = JSON.stringify(processedFiles);
-            const previewValue = prepared.sanitized!.preview ?? null;
-            if (!existing) {
+              const finalId = finalDrawingIdMap.get(i) ?? prepared.id;
+              await assertImportedFilesAvailable(
+                tx,
+                finalId,
+                getRequiredImportedFileIds(
+                  prepared.sanitized!.files,
+                  processedFiles,
+                  finalId,
+                  knownFileIdsBeforeImport.get(i)!,
+                ),
+              );
+              const elementsJson = JSON.stringify(prepared.sanitized!.elements);
+              const appStateJson = JSON.stringify(prepared.sanitized!.appState);
+              const filesJson = JSON.stringify(processedFiles);
+              const previewValue = prepared.sanitized!.preview ?? null;
+              if (!existing) {
+                await tx.drawing.create({
+                  data: {
+                    id: finalId,
+                    name: prepared.name,
+                    elements: elementsJson,
+                    appState: appStateJson,
+                    files: filesJson,
+                    preview: previewValue,
+                    version: prepared.version ?? 1,
+                    userId: req.user!.id,
+                    collectionId: targetCollectionId,
+                  },
+                });
+                drawingsCreated += 1;
+                continue;
+              }
+              if (existing.userId === req.user!.id) {
+                await replaceImportedDrawing(tx, existing, {
+                  name: prepared.name,
+                  elements: elementsJson,
+                  appState: appStateJson,
+                  files: filesJson,
+                  preview: previewValue,
+                  collectionId: targetCollectionId,
+                });
+                drawingsUpdated += 1;
+                continue;
+              }
+              const createId = finalId === prepared.id ? uuidv4() : finalId;
+              if (createId !== finalId) {
+                console.warn(
+                  `[import/excalidash] race conflict on drawing ${prepared.id}; ` +
+                    `creating under ${createId}; S3 objects keyed under ` +
+                    `${prepared.id} are now orphans`,
+                );
+              }
               await tx.drawing.create({
                 data: {
-                  id: finalId,
+                  id: createId,
                   name: prepared.name,
                   elements: elementsJson,
                   appState: appStateJson,
@@ -500,67 +552,35 @@ export const registerExcalidashImportRoutes = (
                 },
               });
               drawingsCreated += 1;
-              continue;
+              drawingIdConflicts += 1;
             }
-            if (existing.userId === req.user!.id) {
-              await tx.drawing.update({
-                where: { id: prepared.id },
-                data: {
-                  name: prepared.name,
-                  elements: elementsJson,
-                  appState: appStateJson,
-                  files: filesJson,
-                  preview: previewValue,
-                  version: prepared.version ?? existing.version,
-                  collectionId: targetCollectionId,
-                },
-              });
-              drawingsUpdated += 1;
-              continue;
-            }
-            const createId = finalId === prepared.id ? uuidv4() : finalId;
-            if (createId !== finalId) {
-              console.warn(
-                `[import/excalidash] race conflict on drawing ${prepared.id}; ` +
-                  `creating under ${createId}; S3 objects keyed under ` +
-                  `${prepared.id} are now orphans`,
-              );
-            }
-            await tx.drawing.create({
-              data: {
-                id: createId,
-                name: prepared.name,
-                elements: elementsJson,
-                appState: appStateJson,
-                files: filesJson,
-                preview: previewValue,
-                version: prepared.version ?? 1,
-                userId: req.user!.id,
-                collectionId: targetCollectionId,
+            return {
+              collections: {
+                created: collectionsCreated,
+                updated: collectionsUpdated,
+                idConflicts: collectionIdConflicts,
               },
-            });
-            drawingsCreated += 1;
-            drawingIdConflicts += 1;
+              drawings: {
+                created: drawingsCreated,
+                updated: drawingsUpdated,
+                idConflicts: drawingIdConflicts,
+              },
+            };
+          });
+          invalidateDrawingsCache();
+          return res.json({
+            success: true,
+            message: "Backup imported successfully",
+            ...result,
+          });
+        } catch (error) {
+          if (error instanceof ImportValidationError) {
+            return res
+              .status(error.status)
+              .json({ error: "Import failed", message: error.message });
           }
-          return {
-            collections: {
-              created: collectionsCreated,
-              updated: collectionsUpdated,
-              idConflicts: collectionIdConflicts,
-            },
-            drawings: {
-              created: drawingsCreated,
-              updated: drawingsUpdated,
-              idConflicts: drawingIdConflicts,
-            },
-          };
-        });
-        invalidateDrawingsCache();
-        return res.json({
-          success: true,
-          message: "Backup imported successfully",
-          ...result,
-        });
+          throw error;
+        }
       } finally {
         await removeFileIfExists(stagedPath);
       }
