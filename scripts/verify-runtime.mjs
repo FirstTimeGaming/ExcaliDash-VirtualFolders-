@@ -621,9 +621,12 @@ try {
         });
         // A novel file id is raced too: either writer may win, but later retry
         // cannot switch the stored generation or delete the winner's object.
+        // Separate owner sessions keep both generations inside the owner
+        // prefix so files/diff can count all objects from the race.
+        const secondOwner = await new Client(owner.email).login();
         await Promise.all([
           upload(owner, "raced", png),
-          upload(peer, "raced", alternate),
+          upload(secondOwner, "raced", alternate),
         ]);
         const raced = await owner.request(`/files/${assets.id}/raced`, {
           raw: true,
