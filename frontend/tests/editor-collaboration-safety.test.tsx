@@ -301,6 +301,62 @@ describe("remote collaboration staging", () => {
       element("live", 1, { x: 150 }),
     ]);
   });
+  it.each(["persisted", "catchup"])(
+    "reuses known inline images across repeated %s snapshots and hydrates new IDs",
+    async (source) => {
+      const h = makeHarness();
+      const known = { id: "image", dataURL: "data:image/png;base64,original" };
+      let editorFiles: Record<string, any> = { image: known };
+      h.editor.getFiles = () => editorFiles;
+      h.editor.addFiles.mockImplementation((files: any[]) => {
+        for (const file of files) {
+          if (!editorFiles[file.id])
+            editorFiles = { ...editorFiles, [file.id]: file };
+        }
+      });
+      h.refs.latestFilesRef.current = editorFiles;
+      h.refs.lastSyncedFilesRef.current = editorFiles;
+      await mount(h.Harness);
+      const deliver = async (files: Record<string, any>) => {
+        await act(async () => {
+          if (source === "persisted") {
+            sockets[0].handlers.get("element-update")({
+              elements: [],
+              files,
+              persisted: true,
+            });
+          } else {
+            vi.mocked(api.getDrawing).mockResolvedValue({
+              elements: [],
+              files,
+            } as never);
+            sockets[0].ack({ user: me });
+          }
+        });
+        await flushFrames();
+      };
+      const knownRef = {
+        image: { id: "image", dataURL: "/api/files/drawing/image" },
+      };
+      for (let i = 0; i < 3; i++) await deliver(knownRef);
+      expect(rehydrateFilesFromUrls).not.toHaveBeenCalled();
+      const newRef = { id: "added", dataURL: "/api/files/drawing/added" };
+      const hydrated = { id: "added", dataURL: "data:image/png;base64,added" };
+      vi.mocked(rehydrateFilesFromUrls).mockResolvedValueOnce({
+        added: hydrated,
+      });
+      await deliver({ ...knownRef, added: newRef });
+      expect(rehydrateFilesFromUrls).toHaveBeenCalledExactlyOnceWith({
+        added: newRef,
+      });
+      expect(editorFiles).toEqual({ image: known, added: hydrated });
+      expect(h.refs.latestFilesRef.current).toEqual({
+        image: known,
+        added: hydrated,
+      });
+      expect(h.refs.lastSyncedFilesRef.current).toEqual(editorFiles);
+    },
+  );
   it("does not acknowledge unrelated unsent local files when applying saved file echoes", async () => {
     const h = makeHarness();
     const local = { id: "local", dataURL: "data:image/png;base64,unsent" };

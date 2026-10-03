@@ -296,7 +296,10 @@ export const useEditorCollaboration = ({
         pendingRemoteElementsRef.current.set(id, next);
       }
     };
-    const stageFiles = (files: Record<string, any> | null | undefined) => {
+    const stageFiles = (
+      files: Record<string, any> | null | undefined,
+      fromSnapshot = false,
+    ) => {
       if (cancelled || !files || typeof files !== "object") return;
       const receipt = {};
       Object.keys(files).forEach((id) => fileReceipts.set(id, receipt));
@@ -310,10 +313,30 @@ export const useEditorCollaboration = ({
         }
         scheduleRemoteFlush();
       };
-      if (filesNeedRehydration(files)) {
-        void rehydrateFilesFromUrls(files).then(stage);
+      const incomingFiles = { ...files };
+      if (fromSnapshot) {
+        // File IDs are immutable. Repeated saved-scene/catchup snapshots need
+        // no download for bytes already held inline by the editor, including
+        // private S3 refs that would otherwise issue new presigned requests.
+        const editorFiles = excalidrawAPI.current?.getFiles?.() || {};
+        const reusableFiles: Record<string, any> = {};
+        for (const id of Object.keys(incomingFiles)) {
+          const current = editorFiles[id];
+          if (
+            typeof current?.dataURL === "string" &&
+            current.dataURL.startsWith("data:") &&
+            filesNeedRehydration({ [id]: incomingFiles[id] })
+          ) {
+            reusableFiles[id] = current;
+            delete incomingFiles[id];
+          }
+        }
+        if (Object.keys(reusableFiles).length > 0) stage(reusableFiles);
+      }
+      if (filesNeedRehydration(incomingFiles)) {
+        void rehydrateFilesFromUrls(incomingFiles).then(stage);
       } else {
-        stage(files);
+        stage(incomingFiles);
       }
     };
     socket.on(
@@ -330,7 +353,7 @@ export const useEditorCollaboration = ({
         persisted?: boolean;
       }) => {
         stageElements(elements, persisted === true);
-        stageFiles(files);
+        stageFiles(files, persisted === true);
         if (
           !persisted &&
           Array.isArray(elementOrder) &&
@@ -357,7 +380,7 @@ export const useEditorCollaboration = ({
             ([id]) => fileReceipts.get(id) === receiptsBeforeRead.get(id),
           ),
         );
-        stageFiles(remoteFiles);
+        stageFiles(remoteFiles, true);
         scheduleRemoteFlush();
       } catch (error) {
         if (!cancelled && generation === catchupGeneration) {
