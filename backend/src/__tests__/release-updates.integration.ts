@@ -56,12 +56,12 @@ describe("release update HTTP routes", () => {
   });
 
   it("queries the stable endpoint rather than a list crowded with dev releases", async () => {
-    const fetch = upstream(release("0.6.4", "2026-10-02T12:00:00Z", false));
+    const fetch = upstream(release(version, "2026-10-02T12:00:00Z", false));
     const response = await request(app).get("/system/update?channel=stable");
     expect(response.status).toBe(200);
     expect(response.body).toMatchObject({
       currentVersion: current,
-      latestVersion: "0.6.4",
+      latestVersion: version,
       isUpdateAvailable: true,
     });
     expect(fetch).toHaveBeenCalledWith(

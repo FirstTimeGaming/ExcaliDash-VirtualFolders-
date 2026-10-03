@@ -8,7 +8,9 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 const read = (file) =>
   readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
 const nginx = read("frontend/nginx.conf.template");
-const listenPort = Number(nginx.match(/\blisten\s+(\d+)\s*;/)?.[1]);
+const listenPorts = [...nginx.matchAll(/\blisten\s+(\d+)\s*;/g)].map((match) =>
+  Number(match[1]),
+);
 // Expand YAML anchors using Compose itself; do not start any services.
 const { services } = JSON.parse(
   execFileSync(
@@ -35,9 +37,9 @@ const frontends = {
 };
 
 test("lab frontends use the unprivileged nginx listener and runtime config", () => {
-  assert.equal(listenPort, 8080);
+  assert.deepEqual(listenPorts, [80, 8080]);
   const dockerfile = read("frontend/Dockerfile");
-  assert.match(dockerfile, /^EXPOSE 8080$/m);
+  assert.match(dockerfile, /^EXPOSE 80 8080$/m);
   assert.match(dockerfile, /CMD \["nginx", "-c", "\/tmp\/nginx.conf"/);
   assert.match(
     read("frontend/docker-entrypoint.sh"),
@@ -57,7 +59,8 @@ for (const [name, hostPort] of Object.entries(frontends)) {
     assert.equal(service.build.dockerfile, "frontend/Dockerfile");
     assert.equal(service.ports.length, 1);
     assert.equal(service.ports[0].published, hostPort);
-    assert.equal(service.ports[0].target, listenPort);
+    const listenPort = service.ports[0].target;
+    assert.ok(listenPorts.includes(listenPort));
     assert.equal(service.ports[0].protocol, "tcp");
     assert.ok(
       service.healthcheck.test.includes(`http://127.0.0.1:${listenPort}`),
