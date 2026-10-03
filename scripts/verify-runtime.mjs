@@ -5,6 +5,9 @@
  * RUNTIME_STATE=/tmp/runtime-state.json persists public fixture expectations.
  * After externally restarting the backend, rerun with --check-restart.
  * RUNTIME_MODULE_ROOT may point at a checkout with installed frontend deps.
+ * RUNTIME_IMPORT_URL optionally selects a second disposable instance for
+ * cross-deployment backup portability; the same fixture password is used.
+ * RUNTIME_EXPORT_ARCHIVE optionally saves the portable backup for inspection.
  * No browser, database mutation, container operation, or external service use.
  */
 import assert from "node:assert/strict";
@@ -32,7 +35,6 @@ assert.equal(
   "1",
   "this harness mutates fixture drawings; explicitly select a disposable instance",
 );
-const api = `${origin}/api`;
 const statePath =
   process.env.RUNTIME_STATE || "/tmp/excalidash-runtime-state.json";
 const timeout = Number(process.env.RUNTIME_TIMEOUT_MS || 15000);
@@ -97,8 +99,9 @@ const managed = (drawingId, fileId) => ({
 });
 
 class Client {
-  constructor(email) {
+  constructor(email, instanceOrigin = origin) {
     this.email = email;
+    this.origin = instanceOrigin.replace(/\/$/, "");
     this.cookies = new Map();
   }
   cookieHeader() {
@@ -127,7 +130,7 @@ class Client {
       requestHeaders["Content-Type"] = "application/json";
       body = JSON.stringify(body);
     }
-    const response = await fetch(`${api}${route}`, {
+    const response = await fetch(`${this.origin}/api${route}`, {
       method,
       headers: requestHeaders,
       body,
@@ -161,7 +164,7 @@ class Client {
     return this;
   }
   async connect(transport = "websocket") {
-    const socket = io(origin, {
+    const socket = io(this.origin, {
       transports: [transport],
       extraHeaders: { Cookie: this.cookieHeader() },
       reconnection: false,
@@ -673,6 +676,10 @@ try {
         const exported = (
           await owner.request("/export/excalidash", { raw: true })
         ).bytes;
+        if (process.env.RUNTIME_EXPORT_ARCHIVE)
+          await writeFile(process.env.RUNTIME_EXPORT_ARCHIVE, exported, {
+            mode: 0o600,
+          });
         const zip = await JSZip.loadAsync(exported);
         const manifest = JSON.parse(
           await zip.file("excalidash.manifest.json").async("string"),
@@ -689,6 +696,7 @@ try {
           assert(file.dataURL.startsWith("data:image/png;base64,"));
         const importer = await new Client(
           process.env.RUNTIME_IMPORT_EMAIL || "runtime.import@example.test",
+          process.env.RUNTIME_IMPORT_URL || origin,
         ).login();
         const imported = await importer.request("/import/excalidash", {
           method: "POST",
@@ -699,11 +707,16 @@ try {
           (item) => item.name === assets.name,
         );
         assert(importedAssets);
-        assert.notEqual(
-          importedAssets.id,
-          assets.id,
-          "foreign owner id collision must allocate a new drawing",
+        if (importer.origin === origin)
+          assert.notEqual(
+            importedAssets.id,
+            assets.id,
+            "foreign owner id collision must allocate a new drawing",
+          );
+        const restoredImported = await importer.request(
+          `/drawings/${importedAssets.id}`,
         );
+        assert.deepEqual(restoredImported.elements, archiveAssets.elements);
         for (const fileId of Object.keys(assets.files))
           await bytesFor(importer, importedAssets.id, fileId);
         const mutated = await save(owner, assets, [
