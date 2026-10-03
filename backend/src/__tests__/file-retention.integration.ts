@@ -18,10 +18,15 @@ import { registerStorageRoutes } from "../routes/storage";
 import { collectRetainedDrawingFileIds } from "../routes/storage/retainedFiles";
 import { registerDrawingCreateUpdateRoutes } from "../routes/dashboard/drawingCreateUpdateRoutes";
 import type { DrawingRouteContext } from "../routes/dashboard/drawingRouteContext";
+import { createDrawingRouteContext } from "../routes/dashboard/drawingRouteContext";
+import type { DashboardRouteDeps } from "../routes/dashboard/types";
 import { applySceneUpdateTx } from "../routes/dashboard/sceneUpdate";
 import { internDrawingFiles } from "../fileProcessing";
+import { registerFileRoutes } from "../routes/files";
+import { storeDrawingFileOnce } from "../drawingFileStore";
 import {
   deleteS3Object,
+  copyS3Object,
   getS3Config,
   isS3Enabled,
   listS3Objects,
@@ -32,12 +37,22 @@ vi.mock("../s3", () => ({
   isS3Enabled: vi.fn(() => false),
   getS3Config: vi.fn(() => null),
   deleteS3Object: vi.fn(async () => {}),
+  copyS3Object: vi.fn(async () => {}),
   listS3Objects: vi.fn(async () => []),
   uploadBuffer: vi.fn(async () => "unused"),
   getPublicUrl: vi.fn((key: string) => `https://files.example/${key}`),
   buildS3Key: vi.fn(
-    (userId: string, drawingId: string, fileId: string) =>
-      `${userId}/${drawingId}/${fileId}.png`,
+    (
+      userId: string,
+      drawingId: string,
+      fileId: string,
+      ext: string,
+      generation?: string,
+    ) =>
+      `${userId}/${drawingId}/${generation ? `${generation}/` : ""}${fileId}.${ext}`,
+  ),
+  generatePresignedDownloadUrl: vi.fn(
+    async (key: string) => `https://downloads.example/${key}`,
   ),
   drawingS3Prefix: vi.fn(
     (userId: string, drawingId: string) => `${userId}/${drawingId}/`,
@@ -76,6 +91,8 @@ describe("File reference lifetime", () => {
     vi.mocked(isS3Enabled).mockReturnValue(false);
     vi.mocked(getS3Config).mockReturnValue(null);
     vi.mocked(listS3Objects).mockResolvedValue([]);
+    vi.mocked(uploadBuffer).mockResolvedValue(undefined);
+    vi.mocked(deleteS3Object).mockResolvedValue(undefined);
     await cleanupTestDb(prisma);
     await prisma.drawingFile.deleteMany({});
     await prisma.user.deleteMany({});
@@ -136,6 +153,312 @@ describe("File reference lifetime", () => {
       config: { nodeEnv: "test" },
       internDrawingFiles: internFiles,
     } as unknown as DrawingRouteContext);
+
+  const mountFiles = () =>
+    registerFileRoutes(app, {
+      prisma,
+      requireAuth: auth,
+      optionalAuth: auth,
+      asyncHandler,
+    });
+
+  it.each(["intern-private", "intern-public", "raw-private", "raw-public"])(
+    "keeps recreated S3 bytes when an old deletion completes late (%s)",
+    async (mode) => {
+      vi.mocked(isS3Enabled).mockReturnValue(true);
+      if (mode.endsWith("public")) {
+        vi.mocked(getS3Config).mockReturnValue({
+          publicUrl: "https://files.example",
+        } as ReturnType<typeof getS3Config>);
+      }
+      const drawing = await createDrawing();
+      const oldKey = `${ownerId}/${drawing.id}/image.png`;
+      const bytes = Buffer.from([1, 2, 3]);
+      const objects = new Map([[oldKey, Buffer.from([9, 9, 9])]]);
+      await prisma.drawingFile.create({
+        data: {
+          drawingId: drawing.id,
+          fileId: "image",
+          storage: "s3",
+          s3Key: oldKey,
+          mimeType: "image/png",
+          sizeBytes: 3,
+        },
+      });
+      let deletionStarted!: () => void;
+      let resumeDeletion!: () => void;
+      const started = new Promise<void>((resolve) => {
+        deletionStarted = resolve;
+      });
+      const resumed = new Promise<void>((resolve) => {
+        resumeDeletion = resolve;
+      });
+      vi.mocked(uploadBuffer).mockImplementation(async (key, body) => {
+        objects.set(key, Buffer.from(body));
+      });
+      vi.mocked(deleteS3Object).mockImplementation(async (key) => {
+        deletionStarted();
+        await resumed;
+        objects.delete(key);
+      });
+      mountStorage();
+      mountFiles();
+      const cleanup = request(app)
+        .post(`/drawings/${drawing.id}/trim`)
+        .send({ confirmName: drawing.name })
+        .then((res) => res);
+      await started;
+      let freshKey: string | null = null;
+      try {
+        let files: Record<string, any>;
+        if (mode.startsWith("intern")) {
+          files = await internDrawingFiles(
+            {
+              image: {
+                dataURL: "data:image/png;base64,AQID",
+                mimeType: "image/png",
+              },
+            },
+            ownerId,
+            drawing.id,
+            prisma,
+          );
+        } else {
+          const upload = await request(app)
+            .put(`/drawings/${drawing.id}/files/image`)
+            .set("Content-Type", "image/png")
+            .send(bytes);
+          expect(upload.status).toBe(200);
+          files = {
+            image: { dataURL: upload.body.url, mimeType: "image/png" },
+          };
+        }
+        await applySceneUpdateTx({
+          prisma,
+          drawingId: drawing.id,
+          parseJsonField,
+          versionGuard: "optimistic",
+          mutate: () => ({
+            data: {},
+            incomingFiles: files,
+            requiredFileIds: ["image"],
+          }),
+        });
+        freshKey = (
+          await prisma.drawingFile.findUniqueOrThrow({
+            where: {
+              drawingId_fileId: { drawingId: drawing.id, fileId: "image" },
+            },
+          })
+        ).s3Key;
+      } finally {
+        resumeDeletion();
+        expect((await cleanup).status).toBe(200);
+      }
+      expect(freshKey).not.toBe(oldKey);
+      expect(freshKey && objects.get(freshKey)?.equals(bytes)).toBe(true);
+      expect(objects.has(oldKey)).toBe(false);
+      const image = await request(app).get(`/files/${drawing.id}/image`);
+      expect(image.status).toBe(302);
+      expect(image.headers.location).toBe(
+        `https://downloads.example/${freshKey}`,
+      );
+    },
+  );
+
+  it.each(["intern", "raw"])(
+    "preserves the first completed interning write against a concurrent %s upload",
+    async (mode) => {
+      vi.mocked(isS3Enabled).mockReturnValue(true);
+      vi.mocked(getS3Config).mockReturnValue({
+        publicUrl: "https://files.example",
+      } as ReturnType<typeof getS3Config>);
+      const drawing = await createDrawing();
+      let bothUploading!: () => void;
+      let releaseWinner!: () => void;
+      let releaseLoser!: () => void;
+      const started = new Promise<void>((resolve) => {
+        bothUploading = resolve;
+      });
+      const winnerReleased = new Promise<void>((resolve) => {
+        releaseWinner = resolve;
+      });
+      const loserReleased = new Promise<void>((resolve) => {
+        releaseLoser = resolve;
+      });
+      const objects = new Map<string, Buffer>();
+      let uploading = 0;
+      vi.mocked(uploadBuffer).mockImplementation(async (key, body) => {
+        objects.set(key, Buffer.from(body));
+        if (++uploading === 2) bothUploading();
+        await (body[0] === 1 ? winnerReleased : loserReleased);
+      });
+      const winner = internDrawingFiles(
+        { image: { dataURL: "data:image/png;base64,AQID" } },
+        ownerId,
+        drawing.id,
+        prisma,
+      );
+      mountFiles();
+      const loser =
+        mode === "intern"
+          ? internDrawingFiles(
+              { image: { dataURL: "data:image/png;base64,CQkJ" } },
+              ownerId,
+              drawing.id,
+              prisma,
+            )
+          : request(app)
+              .put(`/drawings/${drawing.id}/files/image`)
+              .set("Content-Type", "image/jpeg")
+              .send(Buffer.from([9, 9, 9]))
+              .then((res) => {
+                expect(res.status).toBe(200);
+                return { image: { dataURL: res.body.url } };
+              });
+      await started;
+      releaseWinner();
+      const first = await winner;
+      releaseLoser();
+      const second = await loser;
+      const row = await prisma.drawingFile.findUniqueOrThrow({
+        where: { drawingId_fileId: { drawingId: drawing.id, fileId: "image" } },
+      });
+      expect(
+        row.s3Key && objects.get(row.s3Key)?.equals(Buffer.from([1, 2, 3])),
+      ).toBe(true);
+      expect(first.image.dataURL).toBe(`https://files.example/${row.s3Key}`);
+      expect(second.image.dataURL).toBe(
+        mode === "intern"
+          ? first.image.dataURL
+          : `/api/files/${drawing.id}/image`,
+      );
+      expect(row.mimeType).toBe("image/png");
+      expect(new Set([...objects.keys()]).size).toBe(2);
+    },
+  );
+
+  it.each(["intern", "raw"])(
+    "keeps database winner bytes after a stale missing-row lookup in %s",
+    async (mode) => {
+      const drawing = await createDrawing();
+      const bytes = Buffer.from([1, 2, 3, 4]);
+      await prisma.drawingFile.create({
+        data: {
+          drawingId: drawing.id,
+          fileId: "image",
+          storage: "db",
+          data: bytes,
+          mimeType: "image/png",
+          sizeBytes: bytes.length,
+        },
+      });
+      // Another writer has filled the row after this request's initial read.
+      const lookup = vi
+        .spyOn(prisma.drawingFile, "findUnique")
+        .mockResolvedValueOnce(null);
+      mountFiles();
+      try {
+        if (mode === "intern") {
+          await internDrawingFiles(
+            { image: { dataURL: "data:image/png;base64,CQkJ" } },
+            ownerId,
+            drawing.id,
+            prisma,
+          );
+        } else {
+          const res = await request(app)
+            .put(`/drawings/${drawing.id}/files/image`)
+            .set("Content-Type", "image/jpeg")
+            .send(Buffer.from([9, 9, 9]));
+          expect(res.status).toBe(200);
+        }
+        const row = await prisma.drawingFile.findUniqueOrThrow({
+          where: {
+            drawingId_fileId: { drawingId: drawing.id, fileId: "image" },
+          },
+        });
+        expect(row.data && Buffer.from(row.data).equals(bytes)).toBe(true);
+        expect(row.mimeType).toBe("image/png");
+      } finally {
+        lookup.mockRestore();
+      }
+    },
+  );
+
+  it("repairs an empty legacy row once when two stores race", async () => {
+    const drawing = await createDrawing();
+    await prisma.drawingFile.create({
+      data: {
+        drawingId: drawing.id,
+        fileId: "image",
+        storage: "db",
+        data: null,
+        mimeType: "image/png",
+        sizeBytes: 0,
+      },
+    });
+    const base = {
+      drawingId: drawing.id,
+      fileId: "image",
+      storage: "db",
+      s3Key: null,
+      mimeType: "image/png",
+      sizeBytes: 3,
+    };
+    const rows = await Promise.all([
+      storeDrawingFileOnce(prisma, { ...base, data: Buffer.from([1, 2, 3]) }),
+      storeDrawingFileOnce(prisma, { ...base, data: Buffer.from([9, 9, 9]) }),
+    ]);
+    expect(rows[0].data).not.toBeNull();
+    expect(
+      rows[1].data &&
+        rows[0].data &&
+        Buffer.from(rows[0].data).equals(Buffer.from(rows[1].data)),
+    ).toBe(true);
+  });
+
+  it("copies a generated S3 object into an independent drawing key", async () => {
+    vi.mocked(isS3Enabled).mockReturnValue(true);
+    const drawing = await createDrawing();
+    const key = `${ownerId}/${drawing.id}/generation/image.png`;
+    await prisma.drawingFile.create({
+      data: {
+        drawingId: drawing.id,
+        fileId: "image",
+        storage: "s3",
+        s3Key: key,
+        mimeType: "image/png",
+        sizeBytes: 3,
+      },
+    });
+    const context = createDrawingRouteContext({ prisma } as DashboardRouteDeps);
+    const copied = await context.cloneS3FileReferences(
+      drawing.id,
+      "copy",
+      ownerId,
+      {
+        image: {
+          dataURL: `/api/files/${drawing.id}/image`,
+          mimeType: "image/png",
+        },
+      },
+    );
+    const copyKey = `${ownerId}/copy/image.png`;
+    expect(copyS3Object).toHaveBeenCalledExactlyOnceWith(
+      key,
+      copyKey,
+      "image/png",
+    );
+    expect(copied.image.dataURL).toBe("/api/files/copy/image");
+    expect(
+      (
+        await prisma.drawingFile.findUniqueOrThrow({
+          where: { drawingId_fileId: { drawingId: "copy", fileId: "image" } },
+        })
+      ).s3Key,
+    ).toBe(copyKey);
+  });
 
   it.each(["trim", "orphans"])(
     "rejects an unversioned save when %s removes its interned image before commit",

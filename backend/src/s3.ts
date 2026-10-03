@@ -38,7 +38,9 @@ const FILE_KEY_PREFIX = config.s3.keyPrefix;
 
 /**
  * Build the canonical S3 object key for a given drawing's image file.
- * Layout: `{prefix}/{userId}/{drawingId}/{fileId}.{ext}`
+ * Legacy/copy layout: `{prefix}/{userId}/{drawingId}/{fileId}.{ext}`.
+ * New uploads add a generation directory so delayed cleanup of an older
+ * object cannot delete bytes uploaded again under the same file id.
  *
  * Including drawingId means duplicating a drawing always produces a
  * separate object (and S3File row), so deleting the original cannot
@@ -49,7 +51,9 @@ export const buildS3Key = (
   drawingId: string,
   fileId: string,
   ext: string,
-): string => `${FILE_KEY_PREFIX}/${userId}/${drawingId}/${fileId}.${ext}`;
+  generation?: string,
+): string =>
+  `${drawingS3Prefix(userId, drawingId)}${generation ? `${generation}/` : ""}${fileId}.${ext}`;
 
 /** Prefix used when listing objects belonging to a single drawing. */
 export const drawingS3Prefix = (userId: string, drawingId: string): string =>

@@ -14,6 +14,11 @@
  * because the shipped client rehydrates `/api/files/` refs.
  */
 import type { PrismaClient } from "./generated/client";
+import { randomUUID } from "node:crypto";
+import {
+  hasDrawingFileContent,
+  storeDrawingFileOnce,
+} from "./drawingFileStore";
 import {
   isS3Enabled,
   getS3Config,
@@ -110,11 +115,7 @@ export const internDrawingFiles = async (
     const existing = await prisma.drawingFile.findUnique({
       where: { drawingId_fileId: { drawingId, fileId } },
     });
-    if (
-      existing &&
-      ((existing.storage === "s3" && existing.s3Key) ||
-        (existing.storage === "db" && existing.data))
-    ) {
+    if (existing && hasDrawingFileContent(existing)) {
       result[fileId] = {
         ...file,
         mimeType: existing.mimeType,
@@ -130,62 +131,50 @@ export const internDrawingFiles = async (
 
     if (s3Enabled) {
       const ext = MIME_TO_EXT[decoded.mimeType] ?? "bin";
-      const s3Key = buildS3Key(userId, drawingId, fileId, ext);
+      const s3Key = buildS3Key(userId, drawingId, fileId, ext, randomUUID());
 
       await uploadBuffer(s3Key, decoded.buffer, decoded.mimeType);
 
       // Drawing-scoped access URL: a file id alone would be ambiguous
       // because the same content hash legitimately repeats across drawings.
-      const accessUrl = cfg?.publicUrl
-        ? getPublicUrl(s3Key)
-        : `/api/files/${drawingId}/${fileId}`;
-
-      await prisma.drawingFile.upsert({
-        where: { drawingId_fileId: { drawingId, fileId } },
-        create: {
-          drawingId,
-          fileId,
-          mimeType: decoded.mimeType,
-          sizeBytes,
-          storage: "s3",
-          s3Key,
-          data: null,
-        },
-        update: {
-          storage: "s3",
-          s3Key,
-          data: null,
-          mimeType: decoded.mimeType,
-          sizeBytes,
-        },
-      });
-
-      result[fileId] = { ...file, dataURL: accessUrl };
-      return;
-    }
-
-    // Database-bytes mode: store the raw bytes inline in DrawingFile.data.
-    await prisma.drawingFile.upsert({
-      where: { drawingId_fileId: { drawingId, fileId } },
-      create: {
+      const stored = await storeDrawingFileOnce(prisma, {
         drawingId,
         fileId,
         mimeType: decoded.mimeType,
         sizeBytes,
-        storage: "db",
-        s3Key: null,
-        data: decoded.buffer,
-      },
-      update: {
-        storage: "db",
-        s3Key: null,
-        data: decoded.buffer,
-        mimeType: decoded.mimeType,
-        sizeBytes,
-      },
-    });
+        storage: "s3",
+        s3Key,
+        data: null,
+      });
+      result[fileId] = {
+        ...file,
+        mimeType: stored.mimeType,
+        dataURL:
+          cfg?.publicUrl && stored.storage === "s3" && stored.s3Key
+            ? getPublicUrl(stored.s3Key)
+            : `/api/files/${drawingId}/${fileId}`,
+      };
+      return;
+    }
 
-    result[fileId] = { ...file, dataURL: `/api/files/${drawingId}/${fileId}` };
+    // Database-bytes mode: store the raw bytes inline in DrawingFile.data.
+    const stored = await storeDrawingFileOnce(prisma, {
+      drawingId,
+      fileId,
+      mimeType: decoded.mimeType,
+      sizeBytes,
+      storage: "db",
+      s3Key: null,
+      data: decoded.buffer,
+    });
+    result[fileId] = {
+      ...file,
+      mimeType: stored.mimeType,
+      dataURL:
+        cfg?.publicUrl && stored.storage === "s3" && stored.s3Key
+          ? getPublicUrl(stored.s3Key)
+          : `/api/files/${drawingId}/${fileId}`,
+    };
   };
 
   const entries = Object.entries(files);

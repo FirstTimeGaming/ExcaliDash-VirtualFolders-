@@ -15,6 +15,11 @@ import {
   buildS3Key,
 } from "../s3";
 import { MIME_TO_EXT } from "../fileProcessing";
+import { randomUUID } from "node:crypto";
+import {
+  hasDrawingFileContent,
+  storeDrawingFileOnce,
+} from "../drawingFileStore";
 import { config } from "../config";
 import {
   canViewDrawing,
@@ -154,59 +159,35 @@ export const registerFileRoutes = (
       const existing = await prisma.drawingFile.findUnique({
         where: { drawingId_fileId: { drawingId, fileId } },
       });
-      const hasContent =
-        existing &&
-        ((existing.storage === "s3" && Boolean(existing.s3Key)) ||
-          (existing.storage === "db" && Boolean(existing.data)));
-      if (hasContent) {
+      if (hasDrawingFileContent(existing)) {
         return res.status(200).json({ url: responseUrl, fileId });
       }
 
       if (isS3Enabled()) {
         const ext = MIME_TO_EXT[mimeType] ?? "bin";
-        const s3Key = buildS3Key(userId, drawingId, fileId, ext);
+        const s3Key = buildS3Key(userId, drawingId, fileId, ext, randomUUID());
         await uploadBuffer(s3Key, body, mimeType);
-        await prisma.drawingFile.upsert({
-          where: { drawingId_fileId: { drawingId, fileId } },
-          create: {
-            drawingId,
-            fileId,
-            mimeType,
-            sizeBytes: body.length,
-            storage: "s3",
-            s3Key,
-            data: null,
-          },
-          update: {
-            storage: "s3",
-            s3Key,
-            data: null,
-            mimeType,
-            sizeBytes: body.length,
-          },
+        await storeDrawingFileOnce(prisma, {
+          drawingId,
+          fileId,
+          mimeType,
+          sizeBytes: body.length,
+          storage: "s3",
+          s3Key,
+          data: null,
         });
         return res.status(200).json({ url: responseUrl, fileId });
       }
 
       // Database-bytes mode: persist the raw bytes inline.
-      await prisma.drawingFile.upsert({
-        where: { drawingId_fileId: { drawingId, fileId } },
-        create: {
-          drawingId,
-          fileId,
-          mimeType,
-          sizeBytes: body.length,
-          storage: "db",
-          s3Key: null,
-          data: body,
-        },
-        update: {
-          storage: "db",
-          s3Key: null,
-          data: body,
-          mimeType,
-          sizeBytes: body.length,
-        },
+      await storeDrawingFileOnce(prisma, {
+        drawingId,
+        fileId,
+        mimeType,
+        sizeBytes: body.length,
+        storage: "db",
+        s3Key: null,
+        data: body,
       });
       return res.status(200).json({ url: responseUrl, fileId });
     }),

@@ -64,22 +64,23 @@ describe("account backup image storage integration", () => {
     },
   );
 
-  it("bundles managed S3 bytes instead of retaining the public CDN reference", async () => {
-    vi.mocked(downloadBuffer).mockResolvedValue(record.data);
-    expect(
-      await embedDrawingFilesForExport(files(), [
-        {
-          ...record,
-          storage: "s3",
-          s3Key: "owner/drawing/image.png",
-          data: null,
-        },
-      ]),
-    ).toEqual(files(inlineUrl));
-    expect(downloadBuffer).toHaveBeenCalledExactlyOnceWith(
-      "owner/drawing/image.png",
-    );
-  });
+  it.each(["owner/drawing/image.png", "owner/drawing/generation/image.png"])(
+    "bundles managed S3 bytes at %s instead of retaining the public CDN reference",
+    async (s3Key) => {
+      vi.mocked(downloadBuffer).mockResolvedValue(record.data);
+      expect(
+        await embedDrawingFilesForExport(files(), [
+          {
+            ...record,
+            storage: "s3",
+            s3Key,
+            data: null,
+          },
+        ]),
+      ).toEqual(files(inlineUrl));
+      expect(downloadBuffer).toHaveBeenCalledExactlyOnceWith(s3Key);
+    },
+  );
 
   it.each([externalUrl, inlineUrl])(
     "does not mask missing managed database bytes with %s",
