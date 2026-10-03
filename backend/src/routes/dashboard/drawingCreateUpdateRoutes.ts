@@ -423,6 +423,7 @@ export const registerDrawingCreateUpdateRoutes = (
         // Deliver the committed scene so that edit is eventually received.
         io?.to(`drawing_${id}`).emit("element-update", {
           drawingId: id,
+          persisted: true,
           elements: savedElements,
           files: savedFiles,
           elementOrder: savedElements

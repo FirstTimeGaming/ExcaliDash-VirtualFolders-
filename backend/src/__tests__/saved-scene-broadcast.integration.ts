@@ -101,6 +101,7 @@ describe("persisted collaboration scene broadcasts", () => {
     expect(emit).toHaveBeenCalledTimes(1);
     expect(emit).toHaveBeenCalledWith("element-update", {
       drawingId: drawing.id,
+      persisted: true,
       elements: response.body.elements,
       files: response.body.files,
       elementOrder: ["earlier", "new"],
