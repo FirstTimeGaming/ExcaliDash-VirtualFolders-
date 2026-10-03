@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import type { MutableRefObject } from "react";
 import { isFileUploadSupported, uploadDrawingFile } from "../../api";
 import { compressExcalidrawFiles } from "../../utils/imageCompression";
@@ -13,6 +13,7 @@ const UPLOAD_CONCURRENCY = 3;
 const UPLOAD_ATTEMPTS = 2;
 
 type UseEditorFileUploadsParams = {
+  canEdit: boolean;
   drawingId: string | undefined;
   isReady: boolean;
   excalidrawAPI: MutableRefObject<any>;
@@ -37,7 +38,10 @@ const dataUrlToBytes = (
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
       return { bytes, mimeType };
     }
-    return { bytes: new TextEncoder().encode(decodeURIComponent(payload)), mimeType };
+    return {
+      bytes: new TextEncoder().encode(decodeURIComponent(payload)),
+      mimeType,
+    };
   } catch {
     return null;
   }
@@ -49,12 +53,15 @@ const runWithConcurrency = async (
   limit: number,
 ): Promise<void> => {
   let cursor = 0;
-  const workers = Array.from({ length: Math.min(limit, tasks.length) }, async () => {
-    while (cursor < tasks.length) {
-      const task = tasks[cursor++];
-      await task();
-    }
-  });
+  const workers = Array.from(
+    { length: Math.min(limit, tasks.length) },
+    async () => {
+      while (cursor < tasks.length) {
+        const task = tasks[cursor++];
+        await task();
+      }
+    },
+  );
   await Promise.all(workers);
 };
 
@@ -68,6 +75,7 @@ const runWithConcurrency = async (
  * flag flips off after the first 404/501 and this hook becomes inert.
  */
 export const useEditorFileUploads = ({
+  canEdit,
   drawingId,
   isReady,
   excalidrawAPI,
@@ -76,13 +84,18 @@ export const useEditorFileUploads = ({
   uploadedRefs,
 }: UseEditorFileUploadsParams) => {
   const inFlightRef = useRef<Set<string>>(new Set());
+  const canEditRef = useRef(canEdit);
+  useLayoutEffect(() => {
+    canEditRef.current = canEdit;
+  }, [canEdit]);
 
   const scanNow = useCallback(async () => {
-    if (!drawingId || !isFileUploadSupported()) return;
+    if (!canEditRef.current || !drawingId || !isFileUploadSupported()) return;
     const editor = excalidrawAPI.current;
-    const files = (editor?.getFiles?.() ||
-      latestFiles.current ||
-      {}) as Record<string, any>;
+    const files = (editor?.getFiles?.() || latestFiles.current || {}) as Record<
+      string,
+      any
+    >;
 
     const candidateIds = Object.keys(files).filter((id) => {
       const file = files[id];
@@ -131,6 +144,10 @@ export const useEditorFileUploads = ({
         return;
       }
       for (let attempt = 0; attempt < UPLOAD_ATTEMPTS; attempt++) {
+        if (!canEditRef.current) {
+          inFlightRef.current.delete(id);
+          return;
+        }
         try {
           const result = await uploadDrawingFile(
             drawingId,
@@ -159,12 +176,12 @@ export const useEditorFileUploads = ({
   }, [drawingId, excalidrawAPI, isSyncing, latestFiles, uploadedRefs]);
 
   useEffect(() => {
-    if (!drawingId || !isReady) return;
+    if (!canEdit || !drawingId || !isReady) return;
     const interval = window.setInterval(() => {
       void scanNow();
     }, SCAN_INTERVAL_MS);
     return () => window.clearInterval(interval);
-  }, [drawingId, isReady, scanNow]);
+  }, [canEdit, drawingId, isReady, scanNow]);
 
   return { scanNow };
 };
