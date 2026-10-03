@@ -2,7 +2,7 @@
 import { useData, withBase } from "vitepress";
 import marketingVersions from "../../public/images/marketing-versions.json";
 
-const { frontmatter, isDark } = useData();
+const { frontmatter } = useData();
 const imageUrl = (theme: "light" | "dark") =>
   `${withBase(frontmatter.value.canvasImage[theme])}?v=${marketingVersions[theme]}`;
 </script>
@@ -37,7 +37,6 @@ const imageUrl = (theme: "light" | "dark") =>
     <section class="drawing-board">
       <figure
         class="drawing-scene"
-        :class="{ 'scene-is-dark': isDark }"
         role="img"
         :aria-label="frontmatter.canvasImage.alt"
       >
@@ -231,11 +230,12 @@ h1 svg {
   opacity: 1;
 }
 
-.drawing-scene.scene-is-dark img.scene-light {
+/* Follow the root theme class, including before Vue hydrates on refresh. */
+.dark .drawing-scene img.scene-light {
   opacity: 0;
 }
 
-.drawing-scene.scene-is-dark img.scene-dark {
+.dark .drawing-scene img.scene-dark {
   opacity: 1;
 }
 
