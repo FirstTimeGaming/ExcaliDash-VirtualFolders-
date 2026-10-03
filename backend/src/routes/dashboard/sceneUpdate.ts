@@ -7,8 +7,7 @@ import { encodeSnapshotField } from "../../snapshots/snapshotCodec";
 const isBlankFileEntry = (entry: unknown): boolean => {
   if (!entry || typeof entry !== "object") return true;
   const dataURL = (entry as { dataURL?: unknown }).dataURL;
-  if (typeof dataURL === "string") return dataURL.length === 0;
-  return false;
+  return typeof dataURL !== "string" || dataURL.length === 0;
 };
 
 // Merge incoming files into the existing set by fileId (union). Removal is

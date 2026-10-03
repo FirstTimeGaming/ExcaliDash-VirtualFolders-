@@ -173,6 +173,20 @@ describe("Drawing file save-merge (B2)", () => {
     expect(files["file-a"].dataURL).toBe("data:image/png;base64,GOOD=");
   });
 
+  it.each([undefined, null, 42, {}])(
+    "preserves stored image metadata when incoming dataURL is %j",
+    async (dataURL) => {
+      const stored = fileEntry("file-a", "data:image/png;base64,GOOD=");
+      const drawing = await createDrawing(owner.id, { "file-a": stored });
+      const res = await put(drawing.id, {
+        elements: [],
+        files: { "file-a": { id: "file-a", dataURL, mimeType: "image/png" } },
+      });
+      expect(res.status).toBe(200);
+      expect((await readFiles(drawing.id))["file-a"]).toEqual(stored);
+    },
+  );
+
   it("snapshots the authoritative in-transaction state and bumps version", async () => {
     const drawing = await createDrawing(
       owner.id,

@@ -104,6 +104,28 @@ export const internDrawingFiles = async (
     const decoded = decodeDataURL(dataURL);
     if (!decoded) return;
 
+    // File ids are immutable content hashes, just as on the raw upload route.
+    // A stale client's inline copy must not rewrite bytes used by the current
+    // scene or retained snapshots, even if its scene save later conflicts.
+    const existing = await prisma.drawingFile.findUnique({
+      where: { drawingId_fileId: { drawingId, fileId } },
+    });
+    if (
+      existing &&
+      ((existing.storage === "s3" && existing.s3Key) ||
+        (existing.storage === "db" && existing.data))
+    ) {
+      result[fileId] = {
+        ...file,
+        mimeType: existing.mimeType,
+        dataURL:
+          cfg?.publicUrl && existing.storage === "s3" && existing.s3Key
+            ? getPublicUrl(existing.s3Key)
+            : `/api/files/${drawingId}/${fileId}`,
+      };
+      return;
+    }
+
     const sizeBytes = decoded.buffer.length;
 
     if (s3Enabled) {

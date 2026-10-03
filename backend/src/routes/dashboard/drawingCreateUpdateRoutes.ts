@@ -15,6 +15,7 @@ import {
 } from "./trash";
 import type { DrawingRouteContext } from "./drawingRouteContext";
 import { applySceneUpdateTx, isVersionConflict } from "./sceneUpdate";
+import { collectRetainedDrawingFileIds } from "../storage/retainedFiles";
 
 export const registerDrawingCreateUpdateRoutes = (
   app: express.Express,
@@ -54,13 +55,8 @@ export const registerDrawingCreateUpdateRoutes = (
     if (candidates.length === 0) return;
     try {
       await prisma.$transaction(async (tx) => {
-        const current = await tx.drawing.findUnique({
-          where: { id: drawingId },
-          select: { files: true },
-        });
-        const referenced = new Set(
-          Object.keys(parseJsonField(current?.files ?? "{}", {})),
-        );
+        const referenced = await collectRetainedDrawingFileIds(tx, drawingId);
+        if (!referenced) return;
         const deletable = candidates.filter(
           (fileId) => !referenced.has(fileId),
         );
