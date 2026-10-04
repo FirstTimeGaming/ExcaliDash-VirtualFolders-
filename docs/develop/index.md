@@ -1,3 +1,12 @@
+---
+title: ExcaliDash Local Development
+description: Set up the ExcaliDash frontend and backend locally to develop a self-hosted Excalidraw workspace.
+---
+
+<script setup>
+import { setupSlides } from "../.vitepress/theme/screenshot-flows";
+</script>
+
 # Local development
 
 Run the backend and frontend in separate terminals.
@@ -47,4 +56,6 @@ cd frontend
 npm run dev
 ```
 
-Open `http://localhost:6767`.
+Open `http://localhost:6767`, then follow the first-run screens below. Select the arrows to move from authentication setup through creating an administrator and opening your first drawing.
+
+<ScreenshotCarousel label="First-run setup after starting the local services" :slides="setupSlides" />

@@ -1,25 +1,33 @@
 <script setup lang="ts">
 import { useData, withBase } from "vitepress";
-import marketingVersions from "../../public/images/marketing-versions.json";
+import { ref } from "vue";
+import imageVersions from "../../public/images/image-versions.json";
 
 const { frontmatter } = useData();
-const imageUrl = (theme: "light" | "dark") =>
-  `${withBase(frontmatter.value.canvasImage[theme])}?v=${marketingVersions[theme]}`;
+const activeImage = ref(0);
+const imageUrl = (
+  image: { light: string; dark: string },
+  theme: "light" | "dark",
+) =>
+  `${withBase(image[theme])}?v=${(imageVersions as Record<string, string>)[image[theme]] || "1"}`;
 </script>
 
 <template>
-  <main v-if="frontmatter.pageClass === 'canvas-home'" class="drawing-home">
+  <section v-if="frontmatter.pageClass === 'canvas-home'" class="drawing-home">
     <header class="drawing-heading">
       <h1>
-        {{ frontmatter.hero.name }}
+        {{ frontmatter.canvasHero.name }}
+        <span class="drawing-headline">{{
+          frontmatter.canvasHero.headline
+        }}</span>
         <svg viewBox="0 0 600 20" aria-hidden="true">
           <path d="M8 12 Q235 3 591 8 M209 17 Q393 12 581 14" />
         </svg>
       </h1>
-      <p class="drawing-tagline">{{ frontmatter.hero.tagline }}</p>
+      <p class="drawing-tagline">{{ frontmatter.canvasHero.tagline }}</p>
       <div class="drawing-actions">
         <a
-          v-for="action in frontmatter.hero.actions"
+          v-for="action in frontmatter.canvasHero.actions"
           :key="action.link"
           :href="withBase(action.link)"
           :class="['drawing-action', action.theme]"
@@ -35,37 +43,67 @@ const imageUrl = (theme: "light" | "dark") =>
     </header>
 
     <section class="drawing-board">
-      <figure
-        class="drawing-scene"
-        role="img"
-        :aria-label="frontmatter.canvasImage.alt"
-      >
-        <div class="scene-frame">
-          <span class="drawing-corner top" aria-hidden="true" />
-          <img
-            class="scene-light"
-            :src="imageUrl('light')"
-            alt=""
-            aria-hidden="true"
-            width="3200"
-            height="2100"
-            fetchpriority="high"
-          />
-          <img
-            class="scene-dark"
-            :src="imageUrl('dark')"
-            alt=""
-            aria-hidden="true"
-            width="3200"
-            height="2100"
-            fetchpriority="high"
-          />
-          <span class="drawing-corner bottom" aria-hidden="true" />
+      <figure class="drawing-scene" aria-label="ExcaliDash screenshots">
+        <div class="scene-stack">
+          <button
+            v-for="(image, index) in frontmatter.canvasImages"
+            :key="image.label"
+            type="button"
+            :class="[
+              'scene-frame',
+              `scene-position-${index}`,
+              { 'scene-front': activeImage === index },
+            ]"
+            :aria-label="`Show ${image.label} screenshot`"
+            :aria-pressed="activeImage === index"
+            @click="activeImage = index"
+          >
+            <span class="drawing-corner top" aria-hidden="true" />
+            <img
+              class="scene-light"
+              :src="imageUrl(image, 'light')"
+              :alt="image.alt"
+              width="3200"
+              height="2100"
+              :fetchpriority="index === 0 ? 'high' : 'auto'"
+              draggable="false"
+            />
+            <img
+              class="scene-dark"
+              :src="imageUrl(image, 'dark')"
+              alt=""
+              aria-hidden="true"
+              width="3200"
+              height="2100"
+              draggable="false"
+            />
+            <span class="drawing-corner bottom" aria-hidden="true" />
+          </button>
         </div>
+        <figcaption
+          class="scene-caption"
+          :style="{ '--caption-angle': activeImage === 0 ? '-2deg' : '3deg' }"
+        >
+          <div class="scene-switcher" aria-label="Choose a screenshot">
+            <button
+              v-for="(image, index) in frontmatter.canvasImages"
+              :key="image.label"
+              type="button"
+              :aria-pressed="activeImage === index"
+              @click="activeImage = index"
+            >
+              {{ image.label }}
+            </button>
+          </div>
+          <a :href="withBase('/reference/screenshots')"
+            >View more screenshots →</a
+          >
+          <p class="scene-theme-note">Try toggling dark mode!!</p>
+        </figcaption>
       </figure>
 
       <article
-        v-for="(feature, index) in frontmatter.features"
+        v-for="(feature, index) in frontmatter.canvasFeatures"
         :key="feature.title"
         :class="['drawing-note', `note-${index + 1}`]"
       >
@@ -76,16 +114,15 @@ const imageUrl = (theme: "light" | "dark") =>
         <p>{{ feature.details }}</p>
       </article>
     </section>
-  </main>
+  </section>
 </template>
 
 <style scoped>
 .drawing-home {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
   gap: clamp(16px, 3dvh, 32px);
-  height: 100%;
-  min-height: 0;
+  min-height: calc(var(--home-view-height, 100dvh) - var(--vp-nav-height));
   max-width: 1440px;
   margin: 0 auto;
   padding: clamp(16px, 3dvh, 32px) clamp(24px, 4cqi, 64px);
@@ -95,7 +132,6 @@ const imageUrl = (theme: "light" | "dark") =>
   display: grid;
   gap: 12px;
   align-items: center;
-  transform: translateY(clamp(20px, 5dvh, 56px));
 }
 
 h1 {
@@ -119,6 +155,14 @@ h1 svg {
   stroke: var(--violet);
   stroke-width: 3;
   stroke-linecap: round;
+}
+
+.drawing-headline {
+  display: block;
+  margin-top: 12px;
+  font-size: clamp(22px, 3cqi, 36px);
+  line-height: 1.25;
+  letter-spacing: -0.03em;
 }
 
 .drawing-tagline {
@@ -184,7 +228,7 @@ h1 svg {
   position: relative;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-template-rows: minmax(0, 1fr) repeat(3, auto);
+  grid-template-rows: auto repeat(3, auto);
   min-height: 0;
   gap: clamp(12px, 2dvh, 24px);
 }
@@ -193,22 +237,136 @@ h1 svg {
   position: relative;
   display: grid;
   place-items: center;
-  container-type: size;
+  grid-template-rows: auto auto;
+  align-content: center;
+  gap: 8px;
   grid-column: 1 / -1;
   width: 100%;
-  height: 100%;
-  min-height: 0;
   min-width: 0;
-  margin: 0 4px 8px;
+  margin: 0;
+}
+
+.scene-stack {
+  position: relative;
+  width: 90%;
+  /* Reserve space for both fixed offsets and the rotated card corners. */
+  margin-block: calc(6% + 8px);
+  aspect-ratio: 32 / 21;
+  isolation: isolate;
 }
 
 .scene-frame {
-  position: relative;
-  width: min(100%, calc(100cqh * 32 / 21));
-  aspect-ratio: 32 / 21;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  padding: 0;
+  background: var(--vp-c-bg);
+  cursor: pointer;
+  z-index: 0;
+  animation: scene-nudge 6s ease-in-out infinite;
   border: 1px solid var(--vp-c-border);
   border-radius: 5px;
   box-shadow: 0 16px 40px rgb(0 0 0 / 12%);
+}
+
+.scene-position-0 {
+  --scene-x: -3%;
+  --scene-y: -3%;
+  --scene-angle: -2deg;
+  transform: translate(var(--scene-x), var(--scene-y))
+    rotate(var(--scene-angle));
+}
+
+.scene-position-1 {
+  --scene-x: 4%;
+  --scene-y: 4%;
+  --scene-angle: 3deg;
+  transform: translate(var(--scene-x), var(--scene-y))
+    rotate(var(--scene-angle));
+}
+
+.scene-frame.scene-front {
+  z-index: 1;
+  animation: none;
+}
+
+.scene-stack:hover .scene-frame,
+.scene-stack:focus-within .scene-frame {
+  animation: none;
+}
+
+@keyframes scene-nudge {
+  0%,
+  80%,
+  100% {
+    transform: translate(var(--scene-x), var(--scene-y))
+      rotate(var(--scene-angle));
+  }
+  84%,
+  92% {
+    transform: translate(var(--scene-x), var(--scene-y))
+      rotate(calc(var(--scene-angle) + 1deg));
+  }
+  88%,
+  96% {
+    transform: translate(var(--scene-x), var(--scene-y))
+      rotate(calc(var(--scene-angle) - 1deg));
+  }
+}
+
+.scene-frame:focus-visible {
+  outline: 3px solid var(--vp-c-brand-1);
+  outline-offset: 5px;
+}
+
+.scene-caption {
+  transform: rotate(var(--caption-angle, -2deg));
+  position: relative;
+  z-index: 2;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.scene-theme-note {
+  font:
+    14px "Excalifont",
+    cursive;
+  color: var(--vp-c-text-2);
+}
+
+.scene-switcher {
+  display: flex;
+  gap: 6px;
+}
+
+.scene-switcher button {
+  padding: 3px 10px;
+  border: 1px solid var(--vp-c-border);
+  border-radius: 20px;
+  background: var(--vp-c-bg);
+  color: var(--vp-c-text-2);
+  cursor: pointer;
+}
+
+.scene-switcher button[aria-pressed="true"] {
+  border-color: var(--vp-c-brand-1);
+  color: var(--vp-c-brand-1);
+}
+
+.scene-switcher button:focus-visible,
+.scene-caption a:focus-visible {
+  outline: 2px solid var(--vp-c-brand-1);
+  outline-offset: 3px;
+}
+
+.scene-caption a {
+  color: var(--vp-c-brand-1);
+}
+
+.scene-caption a:hover {
+  text-decoration: underline;
 }
 
 .scene-frame img {
@@ -393,7 +551,15 @@ h1 svg {
     font-size: clamp(28px, 5cqi, 48px);
   }
 
-  .docs-review-open .drawing-tagline {
+  .docs-review-open .drawing-headline {
+    display: block;
+    margin-top: 12px;
+    font-size: clamp(22px, 3cqi, 36px);
+    line-height: 1.25;
+    letter-spacing: -0.03em;
+  }
+
+  .drawing-tagline {
     display: none;
   }
 
@@ -405,8 +571,10 @@ h1 svg {
 @media (prefers-reduced-motion: reduce) {
   .drawing-action,
   .drawing-action svg,
-  .drawing-scene img {
+  .drawing-scene img,
+  .scene-frame {
     transition: none;
+    animation: none;
   }
 }
 </style>

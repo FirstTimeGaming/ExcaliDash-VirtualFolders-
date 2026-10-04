@@ -1,3 +1,12 @@
+---
+title: Self-hosted Excalidraw Authentication and OIDC
+description: Configure local accounts or OpenID Connect for your self-hosted Excalidraw workspace, including sign-in modes and OIDC troubleshooting.
+---
+
+<script setup>
+import { userManagementSlides, passwordResetSlides } from "../.vitepress/theme/screenshot-flows";
+</script>
+
 # Authentication
 
 Choose how people sign in with `AUTH_MODE`:
@@ -14,6 +23,26 @@ Use `disabled` only in an isolated, trusted environment. Every visitor has the s
 ## Local accounts
 
 Complete [first-run setup](/guide/first-run). In **Admin**, select **New user** to create an account. Registration settings control whether people can create their own accounts.
+
+<ScreenshotCarousel label="Admin registration settings and New User form" :slides="userManagementSlides" />
+
+## Create an account
+
+If the administrator has enabled registration, select **create a new account** on the sign-in page. Enter your name, email, password, and password confirmation, then select **Create account**. The one-time setup code is only needed when creating the first administrator.
+
+<ThemeScreenshot light="/images/screenshots/registration-light.png" dark="/images/screenshots/registration.png" alt="Create account form for regular user registration" />
+
+## Sign in
+
+Enter your email address and password, then select **Sign in**. If you use OpenID Connect, follow the provider sign-in option configured for your instance.
+
+<ThemeScreenshot light="/images/screenshots/signin-light.png" dark="/images/screenshots/signin.png" alt="Local email and password sign-in page" />
+
+## Reset your password
+
+The administrator must enable password reset and configure email delivery. See the [email settings](/reference/environment#email-and-password-reset).
+
+<ScreenshotCarousel label="Request a reset link and set a new password" :slides="passwordResetSlides" />
 
 ## Configure OpenID Connect
 

@@ -1,3 +1,12 @@
+---
+title: Set Up Your ExcaliDash Workspace
+description: Create your ExcaliDash administrator account, invite users, and organize your first Excalidraw drawings into collections.
+---
+
+<script setup>
+import { setupSlides, userManagementSlides, workspaceSlides } from "../.vitepress/theme/screenshot-flows";
+</script>
+
 # First run
 
 Create the administrator account before inviting other users. The default authentication mode is `local`.
@@ -17,35 +26,25 @@ Create the administrator account before inviting other users. The default authen
 
 ## Create the administrator
 
-For the default `local` mode:
+Use the arrows to follow each screen of the default local-account setup. If authentication is already enabled, start at the administrator form.
 
-1. Open your ExcaliDash URL and select **Create account**.
-2. If the form asks for a one-time setup code, read the backend logs:
-
-   ```bash
-   docker compose -f docker-compose.prod.yml logs --tail=200 backend
-   ```
-
-   Find the entry labeled `BOOTSTRAP SETUP`. In local development, the code appears in the backend terminal.
-
-3. Enter the code, your account details, and create a password.
-4. Select **Create account**. Use this account to manage the instance.
+<ScreenshotCarousel label="Create the first administrator and open your first drawing" :slides="setupSlides" />
 
 Setup codes expire after 15 minutes by default.
 
-To add an account, open **Admin** and select **New user**. To let people register themselves, enable registration in **Admin**.
+## Invite users
+
+Open **Admin** to create another local account or enable self-registration.
+
+<ScreenshotCarousel label="Manage registration and create a local user" :slides="userManagementSlides" />
 
 For OpenID Connect (OIDC), [configure the provider](/guide/authentication#configure-openid-connect) before signing in. `OIDC_FIRST_USER_ADMIN=true` makes the first provisioned OIDC user an administrator.
 
 ## Your workspace
 
-Create drawings and organize them into collections.
+Use the arrows to explore an established example workspace, drawing sharing, and live collaboration.
 
-![Dark-mode drawing dashboard with collections](/images/workspace.png)
-
-Select **Share** to grant access. Collaborators appear as avatars and named cursors.
-
-![Four live sessions reviewing a deployment diagram](/images/collaboration.png)
+<ScreenshotCarousel label="Workspace organization and sharing" :slides="workspaceSlides" />
 
 [Sample drawing credits](/images/CREDITS.txt).
 
