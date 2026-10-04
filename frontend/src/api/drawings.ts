@@ -121,6 +121,7 @@ type DrawingQueryOptions = {
   offset?: number;
   sortField?: DrawingSortField;
   sortDirection?: SortDirection;
+  path?: string;
 };
 
 const buildDrawingParams = (
@@ -136,6 +137,7 @@ const buildDrawingParams = (
   if (options?.offset !== undefined) params.offset = options.offset;
   if (options?.sortField) params.sortField = options.sortField;
   if (options?.sortDirection) params.sortDirection = options.sortDirection;
+  if (options?.path) params.path = options.path;
   return params;
 };
 
@@ -315,10 +317,12 @@ export const revokeLinkShare = async (
 export const createDrawing = async (
   name?: string,
   collectionId?: string | null,
+  path = "/",
 ) => {
   const response = await api.post<{ id: string }>("/drawings", {
     name: name || "Untitled Drawing",
     collectionId: collectionId ?? null,
+    path,
     appState: {},
     elements: [],
   });
