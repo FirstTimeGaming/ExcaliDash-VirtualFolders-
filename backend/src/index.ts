@@ -328,6 +328,7 @@ const filesFieldSchema = z
 const drawingBaseSchema = z.object({
   name: z.string().trim().min(1).max(255).optional(),
   collectionId: z.union([z.string().trim().min(1), z.null()]).optional(),
+  path: z.string().max(1024).optional(),
   preview: z.string().nullable().optional(),
 });
 const drawingCreateSchema = drawingBaseSchema
@@ -363,6 +364,7 @@ export const sanitizeDrawingUpdateData = (data: {
   preview?: string | null;
   name?: string;
   collectionId?: string | null;
+  path?: string;
 }): boolean => {
   const hasSceneFields =
     data.elements !== undefined ||
