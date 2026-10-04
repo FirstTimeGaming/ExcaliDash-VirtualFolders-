@@ -105,6 +105,7 @@ model Drawing {
   user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   collectionId String?
   collection   Collection? @relation(fields: [collectionId], references: [id])
+  path         String      @default("/")
   permissions  DrawingPermission[]
   linkShares   DrawingLinkShare[]
   snapshots    DrawingSnapshot[]
@@ -114,6 +115,7 @@ model Drawing {
 
   @@index([userId, updatedAt])
   @@index([userId, collectionId, updatedAt])
+  @@index([userId, collectionId, path, updatedAt])
 }
 
 model DrawingSnapshot {
