@@ -36,7 +36,7 @@ The UI presents this as `NBF / DAS / Architecture / Auth Flow`, while the persis
 - Follow existing codebase restrictions/sanitization for other characters.
 - Normalize path segments and reject unsafe/ambiguous segments such as empty segments, `.`, and `..`.
 - Folder paths are case-insensitive because persisted paths are lowercase.
-- Drawing names remain case-sensitive.
+- Drawing names remain case-sensitive; drawings that differ only by display-name case may coexist in the same normalized folder path.
 
 ## Rendering and navigation
 
@@ -46,7 +46,7 @@ The UI presents this as `NBF / DAS / Architecture / Auth Flow`, while the persis
 - If a list view exists, use the same folder-first behavior there.
 - Use existing breadcrumb styling if the application already has an analogous breadcrumb component/style. Do not introduce a visually inconsistent breadcrumb system solely for this feature.
 - Browser back/forward should work with folder navigation.
-- Human-readable paths are acceptable in URLs. A stable hash such as MD5 may be considered only if URL/path size becomes a practical issue; human-readable URLs are preferred.
+- Human-readable, URL-encoded paths are preferred in URLs. Do not introduce a path hash/lookup layer for this feature; if URL size becomes a practical problem, solve it separately.
 - Creating a drawing while viewing a folder assigns the current normalized path.
 - Importing a drawing while viewing a folder follows the existing collection-import behavior and assigns the current path.
 - All Drawings remains flat and does not become a folder browser. Drawing cards/details there should show a small full collection/folder path for context.
@@ -55,7 +55,7 @@ The UI presents this as `NBF / DAS / Architecture / Auth Flow`, while the persis
 
 - Individual drawings can be moved through a hierarchical collection/folder picker.
 - Virtual folders can be dragged/moved into other virtual folders.
-- Folder moves may cross collections. Moving a folder across collections updates both the affected drawings' collection and path.
+- Folder moves may cross collections. Moving a folder across collections updates both the affected drawings' collection and path. Collection membership remains the permission boundary, so cross-collection moves intentionally inherit the destination collection's existing access/sharing behavior just like existing Move to Collection operations.
 - Moving/renaming a virtual folder is a prefix rewrite over affected drawings; no folder record is created.
 - Renaming a folder rewrites the relevant prefix while preserving drawing display-name case.
 - Folder-prefix overlap is not itself a collision. Virtual folders with the same prefix naturally merge.
@@ -71,13 +71,22 @@ Collisions are evaluated at the complete resulting drawing path/name level, not 
 - For a multi-item operation, perform collision checks per item.
 - If `folder1/folder1-2/drawing1`, `drawing2`, and `drawing3` are moved and individual destinations conflict, prompt/resolve each conflicting item individually rather than rejecting the entire operation solely because a virtual folder prefix already exists.
 - Non-conflicting items should remain independently actionable.
+- Multi-item moves/renames use a dry-run/plan phase. The dry-run performs no mutations and returns all calculated destinations and collisions.
+- Present all collisions in one resolution dialog rather than a sequence of per-item dialogs.
+- The collision dialog must support bulk actions so large moves are efficient: **Replace All**, **Skip All**, and **Rename All**. Users may override the bulk choice on any individual collision before committing.
+- **Rename All** must generate deterministic, duplicate-safe destination drawing names and show the final proposed names in the dialog before commit. Generated names must be revalidated for collisions.
+- **Replace** (individual or bulk) sends the existing destination drawing through normal Trash behavior and places the incoming drawing at the destination in the same transaction.
+- **Skip** leaves the incoming drawing unchanged.
+- After collision choices are resolved, re-run validation/dry-run and show the final operation plan before mutation.
+- The backend must validate the submitted final plan again immediately before commit to protect against stale/concurrent changes.
+- The final multi-item mutation is atomic: all approved moves/renames/replacements commit in one transaction or none do.
 
 ## Delete and Trash
 
 - Deleting a virtual folder deletes/trashes all drawings contained under that prefix, including descendants.
 - Require explicit confirmation before deleting the folder contents.
 - Preserve existing ExcaliDash Trash semantics rather than inventing a separate folder deletion system.
-- Because folders are path metadata rather than entities, Trash/restore should preserve enough path information for a restored drawing to return consistently where existing behavior permits.
+- Trashing a drawing must not erase or rewrite its virtual path. Restore should therefore return the drawing to the same virtual path where existing collection restore behavior permits.
 - Do not add folder-specific Trash records.
 
 ## Search
