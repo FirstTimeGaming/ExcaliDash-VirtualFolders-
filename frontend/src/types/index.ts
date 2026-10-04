@@ -2,6 +2,7 @@ export interface DrawingSummary {
   id: string;
   name: string;
   collectionId: string | null;
+  path: string;
   updatedAt: number;
   createdAt: number;
   version: number;
