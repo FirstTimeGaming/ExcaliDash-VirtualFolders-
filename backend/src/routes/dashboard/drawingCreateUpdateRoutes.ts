@@ -16,6 +16,7 @@ import {
 import type { DrawingRouteContext } from "./drawingRouteContext";
 import { applySceneUpdateTx, isVersionConflict } from "./sceneUpdate";
 import { collectRetainedDrawingFileIds } from "../storage/retainedFiles";
+import { normalizeVirtualPath, VirtualPathError } from "../../utils/virtualFolders";
 
 export const registerDrawingCreateUpdateRoutes = (
   app: express.Express,
@@ -102,6 +103,7 @@ export const registerDrawingCreateUpdateRoutes = (
       const payload = parsed.data as {
         name?: string;
         collectionId?: string | null;
+        path?: string;
         elements: unknown;
         appState: Record<string, unknown>;
         preview?: string | null;
@@ -109,6 +111,15 @@ export const registerDrawingCreateUpdateRoutes = (
       };
 
       const drawingName = payload.name ?? "Untitled Drawing";
+      let drawingPath: string;
+      try {
+        drawingPath = normalizeVirtualPath(payload.path);
+      } catch (error) {
+        if (error instanceof VirtualPathError) {
+          return res.status(400).json({ error: "Invalid drawing path", message: error.message });
+        }
+        throw error;
+      }
       const targetCollectionIdRaw =
         payload.collectionId === undefined ? null : payload.collectionId;
       const targetCollectionId =
@@ -168,6 +179,7 @@ export const registerDrawingCreateUpdateRoutes = (
             appState: JSON.stringify(payload.appState),
             userId: req.user.id,
             collectionId: targetCollectionId,
+            path: drawingPath,
             preview: processedPreview,
             files: JSON.stringify(processedFiles),
           },
@@ -235,6 +247,7 @@ export const registerDrawingCreateUpdateRoutes = (
       const payload = parsed.data as {
         name?: string;
         collectionId?: string | null;
+        path?: string;
         elements?: unknown;
         appState?: Record<string, unknown>;
         preview?: string | null;
@@ -268,6 +281,16 @@ export const registerDrawingCreateUpdateRoutes = (
       const data: Prisma.DrawingUpdateInput = {};
 
       if (payload.name !== undefined) data.name = payload.name;
+      if (payload.path !== undefined) {
+        try {
+          data.path = normalizeVirtualPath(payload.path);
+        } catch (error) {
+          if (error instanceof VirtualPathError) {
+            return res.status(400).json({ error: "Invalid drawing path", message: error.message });
+          }
+          throw error;
+        }
+      }
       if (payload.elements !== undefined)
         data.elements = JSON.stringify(payload.elements);
       if (payload.appState !== undefined)
