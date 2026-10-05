@@ -107,6 +107,7 @@ type DrawingsGridProps = {
   isSharedView: boolean;
   isSharedCollection: boolean;
   currentCollection?: Collection;
+  showDrawingPath?: boolean;
   onClearSearch: () => void;
   onToggleSelection: (id: string, event: React.MouseEvent) => void;
   onRename: (id: string, name: string) => void;
@@ -131,6 +132,7 @@ export const DrawingsGrid: React.FC<DrawingsGridProps> = ({
   isSharedView,
   isSharedCollection,
   currentCollection,
+  showDrawingPath = false,
   onClearSearch,
   onToggleSelection,
   onRename,
@@ -210,6 +212,7 @@ export const DrawingsGrid: React.FC<DrawingsGridProps> = ({
               isTrash={isTrashView}
               isSharedCollection={isSharedCollection}
               isShared={isSharedView || isSharedCollection}
+              showPath={showDrawingPath}
               onToggleSelection={(event) =>
                 onToggleSelection(drawing.id, event)
               }
