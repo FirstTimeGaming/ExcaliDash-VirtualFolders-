@@ -8,6 +8,7 @@ import {
 import { getUserTrashCollectionId, toPublicTrashCollectionId } from "./trash";
 import { SortDirection, SortField } from "./types";
 import type { DrawingRouteContext } from "./drawingRouteContext";
+import { normalizeVirtualPath, VirtualPathError } from "../../utils/virtualFolders";
 
 // Server-side page size applied when a client omits `limit`, so the list
 // endpoints can never return an unbounded payload (previously every drawing,
@@ -61,6 +62,7 @@ export const registerDrawingListRoutes = (
         offset,
         sortField,
         sortDirection,
+        path,
       } = req.query;
       const where: Prisma.DrawingWhereInput = { userId: req.user.id };
       const searchTerm =
@@ -115,6 +117,27 @@ export const registerDrawingListRoutes = (
         ];
       }
 
+      let folderPath: string | null = null;
+      const supportsFolderNavigation =
+        collectionId !== undefined && collectionId !== "trash";
+      if (supportsFolderNavigation && typeof path === "string") {
+        try {
+          folderPath = normalizeVirtualPath(path);
+        } catch (error) {
+          if (error instanceof VirtualPathError) {
+            return res.status(400).json({ error: "Invalid drawing path", message: error.message });
+          }
+          throw error;
+        }
+      }
+
+      const folderWhere: Prisma.DrawingWhereInput | null = folderPath
+        ? { ...where, path: { startsWith: folderPath } }
+        : null;
+      if (folderPath) {
+        where.path = searchTerm ? { startsWith: folderPath } : folderPath;
+      }
+
       const shouldIncludeData =
         typeof includeData === "string"
           ? includeData.toLowerCase() === "true" || includeData === "1"
@@ -143,7 +166,7 @@ export const registerDrawingListRoutes = (
           includeData: shouldIncludeData,
           sortField: parsedSortField,
           sortDirection: parsedSortDirection,
-        }) + `:${parsedLimit}:${parsedOffset}`;
+        }) + `:path:${folderPath ?? "<flat>"}:${parsedLimit}:${parsedOffset}`;
 
       const cachedBody = getCachedDrawingsBody(cacheKey);
       if (cachedBody) {
@@ -158,6 +181,7 @@ export const registerDrawingListRoutes = (
         id: true,
         name: true,
         collectionId: true,
+        path: true,
         version: true,
         createdAt: true,
         updatedAt: true,
@@ -184,10 +208,39 @@ export const registerDrawingListRoutes = (
         queryOptions.select = summarySelect;
       }
 
-      const [drawings, totalCount] = await Promise.all([
+      const [drawings, totalCount, descendantPaths] = await Promise.all([
         prisma.drawing.findMany(queryOptions),
         prisma.drawing.count({ where }),
+        folderWhere
+          ? prisma.drawing.findMany({
+              where: folderWhere,
+              select: { path: true },
+            })
+          : Promise.resolve([]),
       ]);
+
+      const folders = folderPath
+        ? Array.from(
+            new Set(
+              descendantPaths
+                .map((row) => normalizeVirtualPath(row.path))
+                .filter(
+                  (drawingPath) =>
+                    drawingPath.startsWith(folderPath!) &&
+                    drawingPath !== folderPath,
+                )
+                .map((drawingPath) =>
+                  drawingPath.slice(folderPath!.length).split("/")[0],
+                )
+                .filter(Boolean),
+            ),
+          )
+            .sort((a, b) => a.localeCompare(b))
+            .map((name) => ({
+              name,
+              path: normalizeVirtualPath(`${folderPath}${name}/`),
+            }))
+        : [];
 
       let responsePayload: any[] = drawings as any[];
       if (shouldIncludeData) {
@@ -211,6 +264,8 @@ export const registerDrawingListRoutes = (
 
       const finalResponse = {
         drawings: responsePayload,
+        folders,
+        path: folderPath,
         totalCount,
         limit: parsedLimit,
         offset: parsedOffset,

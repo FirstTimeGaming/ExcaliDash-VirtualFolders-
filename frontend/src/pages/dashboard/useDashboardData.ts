@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "../../api";
-import type { DrawingSortField, SortDirection } from "../../api";
+import type { DrawingSortField, SortDirection, VirtualFolderSummary } from "../../api";
 import type { Collection, DrawingSummary } from "../../types";
 import { isLatestRequest, mergeUniqueDrawings } from "./pagination";
 
@@ -9,6 +9,7 @@ type SelectedCollectionId = string | null | undefined;
 type UseDashboardDataOptions = {
   debouncedSearch: string;
   selectedCollectionId: SelectedCollectionId;
+  currentPath: string;
   sortField: DrawingSortField;
   sortDirection: SortDirection;
   pageSize: number;
@@ -18,6 +19,7 @@ type UseDashboardDataOptions = {
 export const useDashboardData = ({
   debouncedSearch,
   selectedCollectionId,
+  currentPath,
   sortField,
   sortDirection,
   pageSize,
@@ -25,6 +27,7 @@ export const useDashboardData = ({
 }: UseDashboardDataOptions) => {
   const [drawings, setDrawings] = useState<DrawingSummary[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
+  const [folders, setFolders] = useState<VirtualFolderSummary[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [isFetchingMore, setIsFetchingMore] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -50,6 +53,9 @@ export const useDashboardData = ({
             offset: 0,
             sortField,
             sortDirection,
+            ...(selectedCollectionId !== undefined && selectedCollectionId !== "trash"
+              ? { path: currentPath }
+              : {}),
           });
 
       const [drawingsResult, collectionsResult] = await Promise.allSettled([
@@ -61,6 +67,7 @@ export const useDashboardData = ({
 
       if (drawingsResult.status === "fulfilled") {
         setDrawings(drawingsResult.value.drawings);
+        setFolders(drawingsResult.value.folders ?? []);
         setTotalCount(drawingsResult.value.totalCount);
         nextOffsetRef.current = drawingsResult.value.drawings.length;
         onRefreshSuccess?.();
@@ -83,6 +90,7 @@ export const useDashboardData = ({
   }, [
     debouncedSearch,
     selectedCollectionId,
+    currentPath,
     pageSize,
     sortField,
     sortDirection,
@@ -107,6 +115,9 @@ export const useDashboardData = ({
             offset: nextOffsetRef.current,
             sortField,
             sortDirection,
+            ...(selectedCollectionId !== undefined && selectedCollectionId !== "trash"
+              ? { path: currentPath }
+              : {}),
           }));
       if (!isLatestRequest(requestVersion, listRequestVersionRef.current))
         return;
@@ -124,6 +135,7 @@ export const useDashboardData = ({
     isLoading,
     debouncedSearch,
     selectedCollectionId,
+    currentPath,
     pageSize,
     sortField,
     sortDirection,
@@ -138,6 +150,7 @@ export const useDashboardData = ({
     setDrawings,
     collections,
     setCollections,
+    folders,
     totalCount,
     setTotalCount,
     isFetchingMore,
