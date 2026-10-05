@@ -97,6 +97,23 @@ export const registerDrawingMoveRoutes = (
     }
 
     const sourcePath = normalizeVirtualPath(source.path);
+    const sourceSegments = sourcePath.split("/").filter(Boolean);
+    const folderName = sourceSegments[sourceSegments.length - 1];
+    if (!folderName) {
+      throw Object.assign(new Error("Root cannot be moved as a folder"), { status: 400 });
+    }
+    if (
+      source.collectionId === destination.collectionId &&
+      destinationPath.startsWith(sourcePath)
+    ) {
+      throw Object.assign(
+        new Error("A folder cannot be moved into itself or one of its descendants"),
+        { status: 400 },
+      );
+    }
+    const destinationFolderPath = normalizeVirtualPath(
+      `${destinationPath}${folderName}/`,
+    );
     const rows = await prisma.drawing.findMany({
       where: {
         userId,
