@@ -24,6 +24,7 @@ interface UploadContextType {
   uploadFiles: (
     files: File[],
     targetCollectionId: string | null,
+    targetPath?: string,
   ) => Promise<void>;
   clearCompleted: () => void;
   clearSuccessful: () => void;
@@ -74,7 +75,7 @@ export const UploadProvider: React.FC<{ children: ReactNode }> = ({
   }, []);
 
   const uploadFiles = useCallback(
-    async (files: File[], targetCollectionId: string | null) => {
+    async (files: File[], targetCollectionId: string | null, targetPath = "/") => {
       const supportedFiles = files.filter(
         (f) => f.name.endsWith(".json") || f.name.endsWith(".excalidraw"),
       );
@@ -123,6 +124,7 @@ export const UploadProvider: React.FC<{ children: ReactNode }> = ({
           targetCollectionId,
           undefined,
           handleProgress,
+          targetPath,
         );
       } catch (e) {
         console.error("Global upload error", e);

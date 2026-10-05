@@ -8,10 +8,11 @@ type UseDashboardDrawingActionsParams = {
   setDrawings: React.Dispatch<React.SetStateAction<DrawingSummary[]>>;
   collections: Collection[];
   selectedCollectionId: string | null | undefined;
+  currentPath: string;
   selectedIds: Set<string>;
   setSelectedIds: React.Dispatch<React.SetStateAction<Set<string>>>;
   setTotalCount: React.Dispatch<React.SetStateAction<number>>;
-  uploadFiles: (files: File[], collectionId: string | null) => Promise<void>;
+  uploadFiles: (files: File[], collectionId: string | null, path?: string) => Promise<void>;
   refreshData: () => void;
   navigate: NavigateFunction;
 };
@@ -29,6 +30,7 @@ export const useDashboardDrawingActions = ({
   setDrawings,
   collections,
   selectedCollectionId,
+  currentPath,
   selectedIds,
   setSelectedIds,
   setTotalCount,
@@ -73,6 +75,7 @@ export const useDashboardDrawingActions = ({
       const { id } = await api.createDrawing(
         "Untitled Drawing",
         targetCollectionId,
+        currentPath,
       );
       navigate(`/editor/${id}`);
     } catch (err) {
@@ -88,7 +91,7 @@ export const useDashboardDrawingActions = ({
     }
     const targetCollectionId =
       selectedCollectionId === undefined ? null : selectedCollectionId;
-    uploadFiles(Array.from(files), targetCollectionId).finally(refreshData);
+    uploadFiles(Array.from(files), targetCollectionId, currentPath).finally(refreshData);
   };
 
   const handleRenameDrawing = async (id: string, name: string) => {
@@ -297,7 +300,7 @@ export const useDashboardDrawingActions = ({
         (file) => !file.name.endsWith(".excalidrawlib"),
       );
       if (drawingFiles.length > 0) {
-        uploadFiles(drawingFiles, targetCollectionId).finally(refreshData);
+        uploadFiles(drawingFiles, targetCollectionId, currentPath).finally(refreshData);
       }
       return;
     }

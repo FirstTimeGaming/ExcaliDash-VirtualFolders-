@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState, useRef } from "react";
 import { Layout } from "../components/Layout";
-import { Loader2 } from "lucide-react";
+import { ChevronRight, Folder, FolderPlus, Loader2 } from "lucide-react";
 import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { useDebounce } from "../hooks/useDebounce";
 import { ConfirmModal } from "../components/ConfirmModal";
@@ -33,6 +33,21 @@ export const Dashboard: React.FC = () => {
     }
     return undefined;
   }, [location.pathname, searchParams]);
+  const currentPath = React.useMemo(() => {
+    if (selectedCollectionId === undefined || selectedCollectionId === "shared" || selectedCollectionId === "trash") return "/";
+    const raw = searchParams.get("path") || "/";
+    const segments = raw.replace(/\\/g, "/").split("/").map((segment) => segment.trim()).filter(Boolean);
+    return segments.length === 0 ? "/" : `/${segments.join("/").toLowerCase()}/`;
+  }, [selectedCollectionId, searchParams]);
+
+  const navigateToPath = (path: string) => {
+    if (selectedCollectionId === undefined || selectedCollectionId === "shared" || selectedCollectionId === "trash") return;
+    const params = new URLSearchParams();
+    params.set("id", selectedCollectionId === null ? "unorganized" : selectedCollectionId);
+    if (path !== "/") params.set("path", path);
+    navigate(`/collections?${params.toString()}`);
+  };
+
   const setSelectedCollectionId = (id: string | null | undefined) => {
     if (id === undefined) {
       navigate("/");
@@ -66,6 +81,7 @@ export const Dashboard: React.FC = () => {
     setDrawings,
     collections,
     setCollections,
+    folders,
     setTotalCount,
     isFetchingMore,
     isLoading,
@@ -75,6 +91,7 @@ export const Dashboard: React.FC = () => {
   } = useDashboardData({
     debouncedSearch,
     selectedCollectionId,
+    currentPath,
     sortField: sortConfig.field,
     sortDirection: sortConfig.direction,
     pageSize: PAGE_SIZE,
@@ -132,6 +149,7 @@ export const Dashboard: React.FC = () => {
     setDrawings,
     collections,
     selectedCollectionId,
+    currentPath,
     selectedIds,
     setSelectedIds,
     setTotalCount,
@@ -190,6 +208,47 @@ export const Dashboard: React.FC = () => {
         {" "}
         {viewTitle}{" "}
       </h1>{" "}
+      {selectedCollectionId !== undefined &&
+        selectedCollectionId !== "shared" &&
+        selectedCollectionId !== "trash" && (
+          <div className="mb-5 flex flex-wrap items-center gap-2 text-sm">
+            <button
+              className="font-semibold text-indigo-600 hover:underline dark:text-indigo-400"
+              onClick={() => navigateToPath("/")}
+            >
+              {viewTitle}
+            </button>
+            {currentPath
+              .split("/")
+              .filter(Boolean)
+              .map((segment, index, all) => {
+                const path = `/${all.slice(0, index + 1).join("/")}/`;
+                return (
+                  <React.Fragment key={path}>
+                    <ChevronRight size={15} className="text-slate-400" />
+                    <button
+                      className="font-semibold text-slate-700 hover:underline dark:text-slate-300"
+                      onClick={() => navigateToPath(path)}
+                    >
+                      {segment}
+                    </button>
+                  </React.Fragment>
+                );
+              })}
+            <button
+              className="ui-button-secondary ml-auto h-9 px-3"
+              onClick={() => {
+                const name = window.prompt("Folder name");
+                if (!name?.trim()) return;
+                const segment = name.trim().replace(/[\\/]+/g, "-").toLowerCase();
+                if (!segment || segment === "." || segment === "..") return;
+                navigateToPath(`${currentPath}${segment}/`);
+              }}
+            >
+              <FolderPlus size={16} /> New Folder
+            </button>
+          </div>
+        )}{" "}
       <ViewerActionToast message={actions.viewerActionError} />{" "}
       <DashboardToolbar
         search={search}
@@ -244,6 +303,7 @@ export const Dashboard: React.FC = () => {
       >
         {" "}
         {isDraggingFile && <FileDropOverlay viewTitle={viewTitle} />}{" "}
+        {(sortedDrawings.length > 0 || folders.length === 0) && (
         <DrawingsGrid
           drawings={sortedDrawings}
           collections={collections}
@@ -266,7 +326,8 @@ export const Dashboard: React.FC = () => {
           onMouseDown={actions.handleCardMouseDown}
           onDragStart={actions.handleCardDragStart}
           onPreviewGenerated={actions.handlePreviewGenerated}
-        />{" "}
+        />
+        )}{" "}
         <div
           ref={loaderRef}
           className="py-8 flex justify-center items-center h-20"

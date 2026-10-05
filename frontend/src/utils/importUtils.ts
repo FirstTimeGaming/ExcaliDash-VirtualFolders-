@@ -25,6 +25,7 @@ export const importDrawings = async (
     progress: number,
     error?: string,
   ) => void,
+  targetPath = "/",
 ) => {
   const drawingFiles = files.filter(
     (f) => f.name.endsWith(".json") || f.name.endsWith(".excalidraw"),
@@ -67,6 +68,7 @@ export const importDrawings = async (
           appState: extracted.appState,
           files: extracted.files || null,
           collectionId: targetCollectionId,
+          path: targetPath,
           createdAt: (parsed as any)?.createdAt || Date.now(),
           updatedAt: (parsed as any)?.updatedAt || Date.now(),
           preview: svg.outerHTML,
@@ -166,7 +168,8 @@ export const importLegacyFiles = async (
               fileIndex,
               result.failed > 0 ? "error" : "success",
               100,
-              result.failed > 0 ? result.errors.join("\n") : undefined,
+              result.failed > 0 ? result.errors.join("
+") : undefined,
             );
           return;
         }
