@@ -122,6 +122,7 @@ export const registerDrawingDeleteDuplicateRoutes = (
               : original.preview,
           userId: req.user.id,
           collectionId: duplicatedCollectionId,
+          path: original.path,
           version: 1,
         },
       });
