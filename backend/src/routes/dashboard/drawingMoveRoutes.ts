@@ -208,6 +208,59 @@ export const registerDrawingMoveRoutes = (
   );
 
   app.post(
+    "/drawings/folder-trash",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+      try {
+        const collectionId =
+          req.body?.collectionId === null ? null : String(req.body?.collectionId ?? "");
+        const path = normalizeVirtualPath(req.body?.path);
+        if (path === "/") {
+          return res.status(400).json({ error: "Root cannot be deleted as a folder" });
+        }
+
+        if (collectionId) {
+          const collection = await prisma.collection.findFirst({
+            where: { id: collectionId, userId: req.user.id },
+            select: { id: true },
+          });
+          if (!collection) {
+            return res.status(403).json({ error: "Only the collection owner can delete folders" });
+          }
+        }
+
+        await ensureTrashCollection(prisma, req.user.id);
+        const trashId = getUserTrashCollectionId(req.user.id);
+        const result = await prisma.$transaction(async (tx) => {
+          const affected = await tx.drawing.findMany({
+            where: {
+              userId: req.user!.id,
+              collectionId,
+              path: { startsWith: path },
+            },
+            select: { id: true },
+          });
+          if (affected.length === 0) return { count: 0 };
+          await tx.drawing.updateMany({
+            where: { id: { in: affected.map((drawing) => drawing.id) } },
+            data: { collectionId: trashId },
+          });
+          return { count: affected.length };
+        });
+
+        if (result.count === 0) {
+          return res.status(404).json({ error: "Folder not found" });
+        }
+        invalidateDrawingsCache();
+        return res.json({ success: true, trashed: result.count });
+      } catch (error) {
+        return handlerError(res, error);
+      }
+    }),
+  );
+
+  app.post(
     "/drawings/move-commit",
     requireAuth,
     asyncHandler(async (req, res) => {

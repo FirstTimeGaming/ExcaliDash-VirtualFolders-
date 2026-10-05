@@ -438,3 +438,15 @@ export const commitDrawingMove = async (
   });
   return response.data;
 };
+
+export const trashVirtualFolder = async (
+  collectionId: string | null,
+  path: string,
+): Promise<{ success: true; trashed: number }> => {
+  const response = await api.post<{ success: true; trashed: number }>(
+    "/drawings/folder-trash",
+    { collectionId, path },
+  );
+  return response.data;
+};
+

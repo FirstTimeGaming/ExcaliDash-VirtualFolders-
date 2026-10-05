@@ -168,8 +168,7 @@ export const importLegacyFiles = async (
               fileIndex,
               result.failed > 0 ? "error" : "success",
               100,
-              result.failed > 0 ? result.errors.join("
-") : undefined,
+              result.failed > 0 ? result.errors.join("\n") : undefined,
             );
           return;
         }

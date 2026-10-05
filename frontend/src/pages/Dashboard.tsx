@@ -21,6 +21,7 @@ import { useDashboardSelection } from "./dashboard/useDashboardSelection";
 import { useDashboardSort } from "./dashboard/useDashboardSort";
 import { displayFontFamily } from "../utils/displayFont";
 import type { MoveSource } from "../api/drawings";
+import * as api from "../api";
 const PAGE_SIZE = 24;
 export const Dashboard: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -344,22 +345,41 @@ export const Dashboard: React.FC = () => {
                     </span>
                   </span>
                 </button>
-                <button
-                  type="button"
-                  className="ui-button-secondary h-9 shrink-0 px-3 text-xs"
-                  onClick={() =>
-                    openMoveDialog(
-                      {
-                        type: "folder",
-                        collectionId: selectedCollectionId ?? null,
-                        path: folder.path,
-                      },
-                      selectedCollectionId ?? null,
-                    )
-                  }
-                >
-                  Move
-                </button>
+                <div className="flex shrink-0 flex-col gap-2">
+                  <button
+                    type="button"
+                    className="ui-button-secondary h-9 px-3 text-xs"
+                    onClick={() =>
+                      openMoveDialog(
+                        {
+                          type: "folder",
+                          collectionId: selectedCollectionId ?? null,
+                          path: folder.path,
+                        },
+                        selectedCollectionId ?? null,
+                      )
+                    }
+                  >
+                    Move
+                  </button>
+                  {!actions.isSharedCollection && (
+                    <button
+                      type="button"
+                      className="ui-button-secondary h-9 px-3 text-xs"
+                      onClick={async () => {
+                        if (!window.confirm(`Move folder "${folder.name}" and all drawings below it to Trash?`)) return;
+                        try {
+                          await api.trashVirtualFolder(selectedCollectionId ?? null, folder.path);
+                          refreshData();
+                        } catch (error) {
+                          console.error("Failed to trash folder", error);
+                        }
+                      }}
+                    >
+                      Delete
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -376,6 +396,7 @@ export const Dashboard: React.FC = () => {
           isSharedView={actions.isSharedView}
           isSharedCollection={actions.isSharedCollection}
           currentCollection={actions.currentCollection}
+          showDrawingPath={selectedCollectionId === undefined}
           onClearSearch={() => setSearch("")}
           onToggleSelection={selection.handleToggleSelection}
           onRename={actions.handleRenameDrawing}

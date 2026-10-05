@@ -17,6 +17,7 @@ interface DrawingCardProps {
   isTrash?: boolean;
   isShared?: boolean;
   isSharedCollection?: boolean;
+  showPath?: boolean;
   onToggleSelection: (e: React.MouseEvent) => void;
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
@@ -36,6 +37,7 @@ export const DrawingCard: React.FC<DrawingCardProps> = ({
   isTrash = false,
   isShared = false,
   isSharedCollection = false,
+  showPath = false,
   onToggleSelection,
   onRename,
   onDelete,
@@ -263,6 +265,14 @@ export const DrawingCard: React.FC<DrawingCardProps> = ({
               >
                 {drawing.name}
               </h3>
+            )}
+            {showPath && (
+              <p
+                className="mt-1 truncate text-[11px] font-medium text-slate-400 dark:text-neutral-500"
+                title={drawing.path}
+              >
+                {drawing.path || "/"}
+              </p>
             )}
           </div>
 
