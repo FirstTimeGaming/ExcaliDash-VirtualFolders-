@@ -128,7 +128,7 @@ export const registerDrawingMoveRoutes = (
       collectionId: row.collectionId,
       path: row.path,
       destinationPath: normalizeVirtualPath(
-        `${destinationPath}${row.path.slice(sourcePath.length)}`,
+        `${destinationFolderPath}${row.path.slice(sourcePath.length)}`,
       ),
     })) satisfies Candidate[];
   };
@@ -142,6 +142,7 @@ export const registerDrawingMoveRoutes = (
     const existing = await prisma.drawing.findMany({
       where: {
         collectionId: destinationCollectionId,
+        ...(destinationCollectionId === null ? { userId } : {}),
         NOT: { id: { in: [...movingIds] } },
       },
       select: { id: true, name: true, path: true },
