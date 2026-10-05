@@ -392,3 +392,49 @@ export const restoreDrawingSnapshot = async (
   );
   return deserializeDrawing(response.data);
 };
+
+
+export type MoveSource =
+  | { type: "drawings"; drawingIds: string[] }
+  | { type: "folder"; collectionId: string | null; path: string };
+
+export type MoveDestination = { collectionId: string | null; path: string };
+
+export type MoveResolution =
+  | { action: "move" | "replace" | "skip" }
+  | { action: "rename"; name: string };
+
+export type MovePlanItem = {
+  drawingId: string;
+  name: string;
+  source: MoveDestination;
+  destination: MoveDestination & { name: string };
+  collision: { drawingId: string | null; name: string } | null;
+  suggestedName: string | null;
+};
+
+export type MovePlan = { items: MovePlanItem[]; hasCollisions: boolean };
+
+export const planDrawingMove = async (
+  source: MoveSource,
+  destination: MoveDestination,
+): Promise<MovePlan> => {
+  const response = await api.post<MovePlan>("/drawings/move-plan", {
+    source,
+    destination,
+  });
+  return response.data;
+};
+
+export const commitDrawingMove = async (
+  source: MoveSource,
+  destination: MoveDestination,
+  resolutions: Record<string, MoveResolution> = {},
+): Promise<{ success: true; moved: string[]; skipped: string[]; trashed: string[] }> => {
+  const response = await api.post("/drawings/move-commit", {
+    source,
+    destination,
+    resolutions,
+  });
+  return response.data;
+};
