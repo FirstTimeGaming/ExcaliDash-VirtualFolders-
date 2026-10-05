@@ -7,6 +7,7 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { useUpload } from "../context/UploadContext";
 import { DragOverlayPortal } from "./dashboard/shared";
 import { DashboardToolbar } from "./dashboard/DashboardToolbar";
+import { MoveDrawingsModal } from "./dashboard/MoveDrawingsModal";
 import {
   DragPreview,
   DrawingsGrid,
@@ -19,6 +20,7 @@ import { useDashboardDrawingActions } from "./dashboard/useDashboardDrawingActio
 import { useDashboardSelection } from "./dashboard/useDashboardSelection";
 import { useDashboardSort } from "./dashboard/useDashboardSort";
 import { displayFontFamily } from "../utils/displayFont";
+import type { MoveSource } from "../api/drawings";
 const PAGE_SIZE = 24;
 export const Dashboard: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -62,6 +64,7 @@ export const Dashboard: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBulkMoveMenu, setShowBulkMoveMenu] = useState(false);
   const [showSortMenu, setShowSortMenu] = useState(false);
+  const [moveDialog, setMoveDialog] = useState<{ source: MoveSource; collectionId: string | null; path: string } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const loaderRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -175,6 +178,20 @@ export const Dashboard: React.FC = () => {
     () => collections.filter((c) => c.id !== "trash"),
     [collections],
   );
+  const openMoveDialog = (source: MoveSource, collectionId: string | null) => {
+    const currentCollectionId =
+      selectedCollectionId === undefined ||
+      selectedCollectionId === "shared" ||
+      selectedCollectionId === "trash"
+        ? null
+        : selectedCollectionId;
+    setShowBulkMoveMenu(false);
+    setMoveDialog({
+      source,
+      collectionId,
+      path: collectionId === currentCollectionId ? currentPath : "/",
+    });
+  };
   return (
     <Layout
       collections={visibleCollections}
@@ -275,7 +292,7 @@ export const Dashboard: React.FC = () => {
         onBulkDeleteClick={actions.handleBulkDeleteClick}
         onBulkDuplicate={actions.handleBulkDuplicate}
         onShowBulkMoveMenuChange={setShowBulkMoveMenu}
-        onBulkMove={actions.handleBulkMove}
+        onBulkMove={(collectionId) => openMoveDialog({ type: "drawings", drawingIds: Array.from(selectedIds) }, collectionId)}
         onImportDrawings={actions.handleImportDrawings}
         onCreateDrawing={actions.handleCreateDrawing}
         onViewerActionError={actions.handleViewerActionError}
@@ -306,24 +323,44 @@ export const Dashboard: React.FC = () => {
         {folders.length > 0 && (
           <div className="grid grid-cols-1 gap-4 pb-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {folders.map((folder) => (
-              <button
+              <div
                 key={folder.path}
-                type="button"
-                onClick={() => navigateToPath(folder.path)}
-                className="group flex min-h-24 items-center gap-4 rounded-2xl border-2 border-slate-800 bg-white p-4 text-left shadow-[1.5px_1.5px_0px_0px_rgba(30,41,59,0.9)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[3px_3px_0px_0px_rgba(30,41,59,0.9)] dark:border-neutral-700 dark:bg-neutral-900 dark:shadow-[1.5px_1.5px_0px_0px_rgba(255,255,255,0.15)] dark:hover:shadow-[3px_3px_0px_0px_rgba(255,255,255,0.18)]"
+                className="group flex min-h-24 items-center gap-3 rounded-2xl border-2 border-slate-800 bg-white p-4 shadow-[1.5px_1.5px_0px_0px_rgba(30,41,59,0.9)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[3px_3px_0px_0px_rgba(30,41,59,0.9)] dark:border-neutral-700 dark:bg-neutral-900 dark:shadow-[1.5px_1.5px_0px_0px_rgba(255,255,255,0.15)] dark:hover:shadow-[3px_3px_0px_0px_rgba(255,255,255,0.18)]"
               >
-                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border-2 border-slate-800 bg-slate-50 dark:border-neutral-700 dark:bg-neutral-800">
-                  <Folder size={24} className="text-indigo-600 dark:text-indigo-400" />
-                </span>
-                <span className="min-w-0">
-                  <span className="block truncate font-bold text-slate-800 dark:text-neutral-100">
-                    {folder.name}
+                <button
+                  type="button"
+                  onClick={() => navigateToPath(folder.path)}
+                  className="flex min-w-0 flex-1 items-center gap-4 text-left"
+                >
+                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border-2 border-slate-800 bg-slate-50 dark:border-neutral-700 dark:bg-neutral-800">
+                    <Folder size={24} className="text-indigo-600 dark:text-indigo-400" />
                   </span>
-                  <span className="mt-1 block truncate text-xs text-slate-400 dark:text-neutral-500">
-                    {folder.path}
+                  <span className="min-w-0">
+                    <span className="block truncate font-bold text-slate-800 dark:text-neutral-100">
+                      {folder.name}
+                    </span>
+                    <span className="mt-1 block truncate text-xs text-slate-400 dark:text-neutral-500">
+                      {folder.path}
+                    </span>
                   </span>
-                </span>
-              </button>
+                </button>
+                <button
+                  type="button"
+                  className="ui-button-secondary h-9 shrink-0 px-3 text-xs"
+                  onClick={() =>
+                    openMoveDialog(
+                      {
+                        type: "folder",
+                        collectionId: selectedCollectionId ?? null,
+                        path: folder.path,
+                      },
+                      selectedCollectionId ?? null,
+                    )
+                  }
+                >
+                  Move
+                </button>
+              </div>
             ))}
           </div>
         )}{" "}
@@ -345,7 +382,7 @@ export const Dashboard: React.FC = () => {
           onDelete={actions.handleDeleteDrawing}
           onHide={actions.handleHideSharedDrawing}
           onDuplicate={actions.handleDuplicateDrawing}
-          onMoveToCollection={actions.handleMoveToCollection}
+          onMoveToCollection={(id, collectionId) => openMoveDialog({ type: "drawings", drawingIds: [id] }, collectionId)}
           onOpenDrawing={(id) => navigate(`/editor/${id}`)}
           onMouseDown={actions.handleCardMouseDown}
           onDragStart={actions.handleCardDragStart}
@@ -366,6 +403,18 @@ export const Dashboard: React.FC = () => {
           )}{" "}
         </div>{" "}
       </div>{" "}
+      <MoveDrawingsModal
+        isOpen={!!moveDialog}
+        source={moveDialog?.source ?? { type: "drawings", drawingIds: [] }}
+        collections={collections}
+        initialCollectionId={moveDialog?.collectionId ?? null}
+        initialPath={moveDialog?.path ?? "/"}
+        onClose={() => setMoveDialog(null)}
+        onComplete={() => {
+          setSelectedIds(new Set());
+          refreshData();
+        }}
+      />
       <ConfirmModal
         isOpen={!!actions.drawingToDelete}
         title="Delete Drawing"
