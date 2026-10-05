@@ -396,6 +396,7 @@ export const Dashboard: React.FC = () => {
           isSharedView={actions.isSharedView}
           isSharedCollection={actions.isSharedCollection}
           currentCollection={actions.currentCollection}
+          showDrawingPath={selectedCollectionId === undefined}
           onClearSearch={() => setSearch("")}
           onToggleSelection={selection.handleToggleSelection}
           onRename={actions.handleRenameDrawing}
