@@ -85,6 +85,7 @@ const deserializeDrawingSummary = (drawing: unknown): DrawingSummary => {
   const parsed = drawing as HasTimestamps & DrawingSummary;
   return deserializeTimestamps({
     ...parsed,
+    path: typeof parsed.path === "string" ? parsed.path : "/",
     preview:
       typeof parsed.preview === "string"
         ? normalizePreviewSvg(parsed.preview)
@@ -105,7 +106,11 @@ const deserializeDrawing = (drawing: unknown): Drawing => {
   });
 };
 
+export type VirtualFolderSummary = { name: string; path: string };
+
 export interface PaginatedDrawings<T> {
+  folders?: VirtualFolderSummary[];
+  path?: string | null;
   drawings: T[];
   totalCount: number;
   limit?: number;
@@ -121,6 +126,7 @@ type DrawingQueryOptions = {
   offset?: number;
   sortField?: DrawingSortField;
   sortDirection?: SortDirection;
+  path?: string;
 };
 
 const buildDrawingParams = (
@@ -136,6 +142,7 @@ const buildDrawingParams = (
   if (options?.offset !== undefined) params.offset = options.offset;
   if (options?.sortField) params.sortField = options.sortField;
   if (options?.sortDirection) params.sortDirection = options.sortDirection;
+  if (options?.path !== undefined) params.path = options.path;
   return params;
 };
 
@@ -315,10 +322,12 @@ export const revokeLinkShare = async (
 export const createDrawing = async (
   name?: string,
   collectionId?: string | null,
+  path = "/",
 ) => {
   const response = await api.post<{ id: string }>("/drawings", {
     name: name || "Untitled Drawing",
     collectionId: collectionId ?? null,
+    path,
     appState: {},
     elements: [],
   });
