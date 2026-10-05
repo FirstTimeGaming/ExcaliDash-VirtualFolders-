@@ -8,6 +8,7 @@ import { registerDrawingDeleteDuplicateRoutes } from "./drawingDeleteDuplicateRo
 import { registerDrawingSharingRoutes } from "./drawingSharingRoutes";
 import { registerDrawingSharedVisibilityRoutes } from "./drawingSharedVisibilityRoutes";
 import { registerDrawingHistoryRoutes } from "./drawingHistoryRoutes";
+import { registerDrawingMoveRoutes } from "./drawingMoveRoutes";
 
 export const registerDrawingRoutes = (
   app: express.Express,
@@ -18,6 +19,7 @@ export const registerDrawingRoutes = (
   registerDrawingListRoutes(app, context);
   registerDrawingReadRoutes(app, context);
   registerDrawingCreateUpdateRoutes(app, context);
+  registerDrawingMoveRoutes(app, context);
   registerDrawingDeleteDuplicateRoutes(app, context);
   registerDrawingSharingRoutes(app, context);
   registerDrawingSharedVisibilityRoutes(app, context);
