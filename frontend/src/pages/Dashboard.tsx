@@ -7,6 +7,7 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { useUpload } from "../context/UploadContext";
 import { DragOverlayPortal } from "./dashboard/shared";
 import { DashboardToolbar } from "./dashboard/DashboardToolbar";
+import { MoveDrawingsModal } from "./dashboard/MoveDrawingsModal";
 import {
   DragPreview,
   DrawingsGrid,
@@ -19,6 +20,7 @@ import { useDashboardDrawingActions } from "./dashboard/useDashboardDrawingActio
 import { useDashboardSelection } from "./dashboard/useDashboardSelection";
 import { useDashboardSort } from "./dashboard/useDashboardSort";
 import { displayFontFamily } from "../utils/displayFont";
+import type { MoveSource } from "../api/drawings";
 const PAGE_SIZE = 24;
 export const Dashboard: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -62,6 +64,7 @@ export const Dashboard: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBulkMoveMenu, setShowBulkMoveMenu] = useState(false);
   const [showSortMenu, setShowSortMenu] = useState(false);
+  const [moveDialog, setMoveDialog] = useState<{ source: MoveSource; collectionId: string | null; path: string } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const loaderRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -175,6 +178,20 @@ export const Dashboard: React.FC = () => {
     () => collections.filter((c) => c.id !== "trash"),
     [collections],
   );
+  const openMoveDialog = (source: MoveSource, collectionId: string | null) => {
+    const currentCollectionId =
+      selectedCollectionId === undefined ||
+      selectedCollectionId === "shared" ||
+      selectedCollectionId === "trash"
+        ? null
+        : selectedCollectionId;
+    setShowBulkMoveMenu(false);
+    setMoveDialog({
+      source,
+      collectionId,
+      path: collectionId === currentCollectionId ? currentPath : "/",
+    });
+  };
   return (
     <Layout
       collections={visibleCollections}
@@ -275,7 +292,7 @@ export const Dashboard: React.FC = () => {
         onBulkDeleteClick={actions.handleBulkDeleteClick}
         onBulkDuplicate={actions.handleBulkDuplicate}
         onShowBulkMoveMenuChange={setShowBulkMoveMenu}
-        onBulkMove={actions.handleBulkMove}
+        onBulkMove={(collectionId) => openMoveDialog({ type: "drawings", drawingIds: Array.from(selectedIds) }, collectionId)}
         onImportDrawings={actions.handleImportDrawings}
         onCreateDrawing={actions.handleCreateDrawing}
         onViewerActionError={actions.handleViewerActionError}
@@ -345,7 +362,7 @@ export const Dashboard: React.FC = () => {
           onDelete={actions.handleDeleteDrawing}
           onHide={actions.handleHideSharedDrawing}
           onDuplicate={actions.handleDuplicateDrawing}
-          onMoveToCollection={actions.handleMoveToCollection}
+          onMoveToCollection={(id, collectionId) => openMoveDialog({ type: "drawings", drawingIds: [id] }, collectionId)}
           onOpenDrawing={(id) => navigate(`/editor/${id}`)}
           onMouseDown={actions.handleCardMouseDown}
           onDragStart={actions.handleCardDragStart}
@@ -366,6 +383,18 @@ export const Dashboard: React.FC = () => {
           )}{" "}
         </div>{" "}
       </div>{" "}
+      <MoveDrawingsModal
+        isOpen={!!moveDialog}
+        source={moveDialog?.source ?? { type: "drawings", drawingIds: [] }}
+        collections={collections}
+        initialCollectionId={moveDialog?.collectionId ?? null}
+        initialPath={moveDialog?.path ?? "/"}
+        onClose={() => setMoveDialog(null)}
+        onComplete={() => {
+          setSelectedIds(new Set());
+          refreshData();
+        }}
+      />
       <ConfirmModal
         isOpen={!!actions.drawingToDelete}
         title="Delete Drawing"
