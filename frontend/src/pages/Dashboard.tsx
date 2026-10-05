@@ -303,6 +303,30 @@ export const Dashboard: React.FC = () => {
       >
         {" "}
         {isDraggingFile && <FileDropOverlay viewTitle={viewTitle} />}{" "}
+        {folders.length > 0 && (
+          <div className="grid grid-cols-1 gap-4 pb-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {folders.map((folder) => (
+              <button
+                key={folder.path}
+                type="button"
+                onClick={() => navigateToPath(folder.path)}
+                className="group flex min-h-24 items-center gap-4 rounded-2xl border-2 border-slate-800 bg-white p-4 text-left shadow-[1.5px_1.5px_0px_0px_rgba(30,41,59,0.9)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[3px_3px_0px_0px_rgba(30,41,59,0.9)] dark:border-neutral-700 dark:bg-neutral-900 dark:shadow-[1.5px_1.5px_0px_0px_rgba(255,255,255,0.15)] dark:hover:shadow-[3px_3px_0px_0px_rgba(255,255,255,0.18)]"
+              >
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border-2 border-slate-800 bg-slate-50 dark:border-neutral-700 dark:bg-neutral-800">
+                  <Folder size={24} className="text-indigo-600 dark:text-indigo-400" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block truncate font-bold text-slate-800 dark:text-neutral-100">
+                    {folder.name}
+                  </span>
+                  <span className="mt-1 block truncate text-xs text-slate-400 dark:text-neutral-500">
+                    {folder.path}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}{" "}
         {(sortedDrawings.length > 0 || folders.length === 0) && (
         <DrawingsGrid
           drawings={sortedDrawings}
