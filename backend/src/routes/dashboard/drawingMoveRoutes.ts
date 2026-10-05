@@ -150,19 +150,19 @@ export const registerDrawingMoveRoutes = (
       collisionKey(destinationCollectionId, normalizeVirtualPath(row.path), row.name),
       row,
     ]));
-    const planned = new Set<string>();
+    const reserved = new Set<string>(occupied.keys());
 
     const items = candidates.map((candidate) => {
       const keyFor = (name: string) =>
         collisionKey(destinationCollectionId, candidate.destinationPath, name);
       const key = keyFor(candidate.name);
       const collision = occupied.get(key);
-      const intraBatchCollision = planned.has(key);
+      const intraBatchCollision = !collision && reserved.has(key);
       const suggestedName =
         collision || intraBatchCollision
-          ? suggestRename(candidate.name, new Set([...occupied.keys(), ...planned]), keyFor)
+          ? suggestRename(candidate.name, reserved, keyFor)
           : null;
-      planned.add(key);
+      reserved.add(suggestedName ? keyFor(suggestedName) : key);
       return {
         drawingId: candidate.id,
         name: candidate.name,
